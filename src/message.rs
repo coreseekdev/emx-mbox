@@ -7,6 +7,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
+use crate::builder::Attachment;
 use crate::error::MboxError;
 use crate::format::normalize_line_endings;
 
@@ -123,10 +124,71 @@ impl MailMessage {
     pub fn parsed(&self) -> Result<mailparse::ParsedMail<'_>, MboxError> {
         Ok(parse_mail(&self.raw)?)
     }
+
+    /// Extract attachments from a MIME multipart message.
+    /// Returns an empty Vec for plain-text messages.
+    pub fn attachments(&self) -> Vec<Attachment> {
+        let parsed = match parse_mail(&self.raw) {
+            Ok(p) => p,
+            Err(_) => return Vec::new(),
+        };
+
+        let mut result = Vec::new();
+        collect_attachments(&parsed, &mut result);
+        result
+    }
 }
 
 impl fmt::Display for MailMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", String::from_utf8_lossy(&self.raw))
+    }
+}
+
+/// Recursively walk MIME parts and collect attachment parts.
+fn collect_attachments(part: &mailparse::ParsedMail<'_>, out: &mut Vec<Attachment>) {
+    // Check Content-Disposition for "attachment"
+    let disposition = part
+        .headers
+        .iter()
+        .find(|h| h.get_key().eq_ignore_ascii_case("Content-Disposition"))
+        .map(|h| h.get_value());
+
+    if let Some(ref disp) = disposition {
+        if disp.starts_with("attachment") {
+            let filename = extract_param(disp, "filename")
+                .unwrap_or_else(|| "attachment".into());
+            let content_type = part
+                .ctype
+                .mimetype
+                .clone();
+            // Get the decoded body bytes
+            if let Ok(data) = part.get_body_raw() {
+                out.push(Attachment::new(filename, content_type, data));
+                return;
+            }
+        }
+    }
+
+    // Recurse into sub-parts
+    for sub in &part.subparts {
+        collect_attachments(sub, out);
+    }
+}
+
+/// Extract a named parameter from a header value like
+/// `attachment; filename="foo.png"`.
+fn extract_param(header_value: &str, param_name: &str) -> Option<String> {
+    let needle = format!("{}=", param_name);
+    let pos = header_value.find(&needle)?;
+    let rest = &header_value[pos + needle.len()..];
+    if rest.starts_with('"') {
+        // Quoted value
+        let end = rest[1..].find('"')?;
+        Some(rest[1..1 + end].to_string())
+    } else {
+        // Unquoted — take until `;` or end
+        let end = rest.find(';').unwrap_or(rest.len());
+        Some(rest[..end].trim().to_string())
     }
 }

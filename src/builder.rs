@@ -1,7 +1,50 @@
+use std::fs;
+use std::path::Path;
+
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::{DateTime, Local, Utc};
 use uuid::Uuid;
 
 use crate::message::MailMessage;
+
+/// A file attachment with content and metadata.
+pub struct Attachment {
+    /// The filename (e.g. `image.png`).
+    pub filename: String,
+    /// MIME type (e.g. `image/png`). Auto-detected if not specified.
+    pub content_type: String,
+    /// Raw file content.
+    pub data: Vec<u8>,
+}
+
+impl Attachment {
+    /// Create an attachment from raw bytes.
+    pub fn new(filename: impl Into<String>, content_type: impl Into<String>, data: Vec<u8>) -> Self {
+        Self {
+            filename: filename.into(),
+            content_type: content_type.into(),
+            data,
+        }
+    }
+
+    /// Create an attachment by reading a file from disk.
+    /// MIME type is guessed from the file extension.
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, std::io::Error> {
+        let path = path.as_ref();
+        let filename = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "attachment".into());
+        let content_type = guess_mime(&filename);
+        let data = fs::read(path)?;
+        Ok(Self {
+            filename,
+            content_type,
+            data,
+        })
+    }
+}
 
 /// Construct RFC 5322 messages suitable for b4 / git-am workflows.
 pub struct MessageBuilder {
@@ -16,6 +59,7 @@ pub struct MessageBuilder {
     date: Option<DateTime<Utc>>,
     extra_headers: Vec<(String, String)>,
     trailers: Vec<(String, String)>,
+    attachments: Vec<Attachment>,
 }
 
 impl MessageBuilder {
@@ -32,6 +76,7 @@ impl MessageBuilder {
             date: None,
             extra_headers: Vec::new(),
             trailers: Vec::new(),
+            attachments: Vec::new(),
         }
     }
 
@@ -96,6 +141,23 @@ impl MessageBuilder {
         self.trailer("Acked-by", value)
     }
 
+    /// Attach a file by path. MIME type is guessed from the extension.
+    pub fn attach_file<P: AsRef<Path>>(mut self, path: P) -> Result<Self, std::io::Error> {
+        self.attachments.push(Attachment::from_file(path)?);
+        Ok(self)
+    }
+
+    /// Attach raw bytes with a filename and MIME type.
+    pub fn attach(
+        mut self,
+        filename: impl Into<String>,
+        content_type: impl Into<String>,
+        data: Vec<u8>,
+    ) -> Self {
+        self.attachments.push(Attachment::new(filename, content_type, data));
+        self
+    }
+
     /// Build a `[PATCH vN M/N]` style subject prefix.
     pub fn patch_subject(
         mut self,
@@ -140,7 +202,8 @@ impl MessageBuilder {
         raw.push_str(&format!("Date: {}\n", date_str));
         raw.push_str(&format!("Message-ID: {}\n", msg_id));
         raw.push_str("MIME-Version: 1.0\n");
-        raw.push_str("Content-Type: text/plain; charset=utf-8\n");
+
+        let has_attachments = !self.attachments.is_empty();
 
         if let Some(ref irt) = self.in_reply_to {
             raw.push_str(&format!("In-Reply-To: {}\n", irt));
@@ -153,27 +216,75 @@ impl MessageBuilder {
             raw.push_str(&format!("{}: {}\n", name, value));
         }
 
-        // Blank line separating headers from body.
-        raw.push('\n');
-        raw.push_str(&self.body);
-        if !self.body.is_empty() && !self.body.ends_with('\n') {
-            raw.push('\n');
-        }
+        if has_attachments {
+            // MIME multipart/mixed
+            let boundary = generate_boundary();
+            raw.push_str(&format!(
+                "Content-Type: multipart/mixed; boundary=\"{}\"\n",
+                boundary
+            ));
 
-        // Trailers (after body, before final newline).
-        if !self.trailers.is_empty() {
-            // Ensure a blank line before trailers if body doesn't end with one.
-            if !self.body.is_empty() && !self.body.ends_with("\n\n") {
-                // Body already has a trailing \n from above; no extra blank needed
-                // unless body is missing the separator. Trailers follow directly.
+            // Blank line ends headers.
+            raw.push('\n');
+            raw.push_str("This is a multi-part message in MIME format.\n");
+
+            // --- text/plain part ---
+            raw.push_str(&format!("\n--{}\n", boundary));
+            raw.push_str("Content-Type: text/plain; charset=utf-8\n");
+            raw.push_str("Content-Transfer-Encoding: 8bit\n\n");
+            raw.push_str(&self.body);
+            if !self.body.is_empty() && !self.body.ends_with('\n') {
+                raw.push('\n');
             }
+            // Trailers go inside the text part.
             for (name, value) in &self.trailers {
                 raw.push_str(&format!("{}\n", format_trailer(name, value)));
             }
-        }
 
-        if !raw.ends_with('\n') {
+            // --- attachment parts ---
+            for att in &self.attachments {
+                raw.push_str(&format!("\n--{}\n", boundary));
+                raw.push_str(&format!(
+                    "Content-Type: {}; name=\"{}\"\n",
+                    att.content_type, att.filename
+                ));
+                raw.push_str("Content-Transfer-Encoding: base64\n");
+                raw.push_str(&format!(
+                    "Content-Disposition: attachment; filename=\"{}\"\n",
+                    att.filename
+                ));
+                raw.push('\n');
+                // base64 with line wrapping at 76 chars
+                let encoded = BASE64.encode(&att.data);
+                for chunk in encoded.as_bytes().chunks(76) {
+                    raw.push_str(std::str::from_utf8(chunk).unwrap_or_default());
+                    raw.push('\n');
+                }
+            }
+
+            // Closing boundary.
+            raw.push_str(&format!("--{}--\n", boundary));
+        } else {
+            // Simple text/plain message (no attachments).
+            raw.push_str("Content-Type: text/plain; charset=utf-8\n");
+
+            // Blank line separating headers from body.
             raw.push('\n');
+            raw.push_str(&self.body);
+            if !self.body.is_empty() && !self.body.ends_with('\n') {
+                raw.push('\n');
+            }
+
+            // Trailers (after body).
+            if !self.trailers.is_empty() {
+                for (name, value) in &self.trailers {
+                    raw.push_str(&format!("{}\n", format_trailer(name, value)));
+                }
+            }
+
+            if !raw.ends_with('\n') {
+                raw.push('\n');
+            }
         }
 
         MailMessage::from_raw(raw.into_bytes())
@@ -188,4 +299,42 @@ fn generate_message_id() -> String {
 /// Format a trailer line: `Name: value`.
 fn format_trailer(name: &str, value: &str) -> String {
     format!("{}: {}", name, value)
+}
+
+/// Generate a unique MIME boundary string.
+fn generate_boundary() -> String {
+    let uuid = Uuid::new_v4();
+    format!("----=_emx_{}", uuid.as_simple())
+}
+
+/// Guess MIME type from file extension.
+fn guess_mime(filename: &str) -> String {
+    let ext = filename
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        "pdf" => "application/pdf",
+        "zip" => "application/zip",
+        "gz" | "gzip" => "application/gzip",
+        "tar" => "application/x-tar",
+        "txt" => "text/plain",
+        "html" | "htm" => "text/html",
+        "css" => "text/css",
+        "js" => "application/javascript",
+        "json" => "application/json",
+        "xml" => "application/xml",
+        "csv" => "text/csv",
+        "patch" | "diff" => "text/x-patch",
+        _ => "application/octet-stream",
+    }
+    .into()
 }

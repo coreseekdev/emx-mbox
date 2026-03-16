@@ -6,7 +6,7 @@ mod message;
 mod reader;
 mod writer;
 
-pub use builder::MessageBuilder;
+pub use builder::{Attachment, MessageBuilder};
 pub use error::MboxError;
 pub use format::MboxFormat;
 pub use mbox::Mbox;

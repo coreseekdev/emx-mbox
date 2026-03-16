@@ -1,5 +1,5 @@
 use chrono::{TimeZone, Utc};
-use emx_mbox::{Mbox, MboxReader, MboxWriter, MailMessage, MessageBuilder, MboxFormat};
+use emx_mbox::{Attachment, Mbox, MboxReader, MboxWriter, MailMessage, MessageBuilder, MboxFormat};
 
 // -----------------------------------------------------------------------
 // Basic parsing
@@ -522,4 +522,126 @@ fn test_builder_custom_trailer() {
 
     let body = String::from_utf8_lossy(&msg.raw);
     assert!(body.contains("Tested-by: QA <qa@example.com>"), "body = {}", body);
+}
+
+// -----------------------------------------------------------------------
+// Attachments
+// -----------------------------------------------------------------------
+
+#[test]
+fn test_single_attachment() {
+    let png_data = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]; // PNG header
+    let msg = MessageBuilder::new("alice@example.com", "Screenshot")
+        .body("See attached.\n")
+        .attach("screenshot.png", "image/png", png_data.clone())
+        .build();
+
+    // Should be multipart/mixed
+    let ct = msg.header("Content-Type").unwrap();
+    assert!(ct.contains("multipart/mixed"), "Content-Type = {}", ct);
+
+    // Should contain the text body
+    let raw = String::from_utf8_lossy(&msg.raw);
+    assert!(raw.contains("See attached."), "raw = {}", raw);
+
+    // Should contain the attachment filename
+    assert!(raw.contains("screenshot.png"), "raw = {}", raw);
+
+    // Parse attachments back
+    let attachments = msg.attachments();
+    assert_eq!(attachments.len(), 1, "should have 1 attachment");
+    assert_eq!(attachments[0].filename, "screenshot.png");
+    assert_eq!(attachments[0].content_type, "image/png");
+    assert_eq!(attachments[0].data, png_data);
+}
+
+#[test]
+fn test_multiple_attachments() {
+    let png_data = vec![0x89, 0x50, 0x4E, 0x47]; // fake PNG
+    let svg_data = b"<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>".to_vec();
+
+    let msg = MessageBuilder::new("alice@example.com", "Designs")
+        .body("Two attachments.\n")
+        .attach("logo.png", "image/png", png_data.clone())
+        .attach("icon.svg", "image/svg+xml", svg_data.clone())
+        .build();
+
+    let attachments = msg.attachments();
+    assert_eq!(attachments.len(), 2, "should have 2 attachments");
+    assert_eq!(attachments[0].filename, "logo.png");
+    assert_eq!(attachments[0].data, png_data);
+    assert_eq!(attachments[1].filename, "icon.svg");
+    assert_eq!(attachments[1].data, svg_data);
+}
+
+#[test]
+fn test_attachment_roundtrip_through_mbox() {
+    let file_data = b"Hello, this is a text file attachment.".to_vec();
+
+    let msg = MessageBuilder::new("sender@example.com", "With attachment")
+        .body("Please see the attached file.\n")
+        .attach("notes.txt", "text/plain", file_data.clone())
+        .build();
+
+    // Save to mbox and reload
+    let mut mbox = Mbox::new();
+    mbox.append(msg);
+
+    let mut buf = Vec::new();
+    {
+        let mut writer = MboxWriter::new(&mut buf);
+        mbox.save(&mut writer).unwrap();
+    }
+
+    let reloaded = Mbox::load(buf.as_slice()).unwrap();
+    assert_eq!(reloaded.len(), 1);
+
+    let loaded_msg = &reloaded.messages()[0];
+    assert_eq!(loaded_msg.subject(), "With attachment");
+
+    let attachments = loaded_msg.attachments();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].filename, "notes.txt");
+    assert_eq!(attachments[0].data, file_data);
+}
+
+#[test]
+fn test_no_attachments_still_plain() {
+    // Without attachments, Content-Type should be text/plain
+    let msg = MessageBuilder::new("alice@example.com", "Plain")
+        .body("Just text.\n")
+        .build();
+
+    let ct = msg.header("Content-Type").unwrap();
+    assert!(ct.contains("text/plain"), "Content-Type = {}", ct);
+    assert!(msg.attachments().is_empty());
+}
+
+#[test]
+fn test_attachment_with_trailers() {
+    let data = vec![0xFF, 0xD8, 0xFF, 0xE0]; // fake JPEG header
+
+    let msg = MessageBuilder::new("dev@kernel.org", "[PATCH] Add icon")
+        .body("Patch body\n")
+        .attach("icon.jpg", "image/jpeg", data.clone())
+        .signed_off_by("Dev <dev@kernel.org>")
+        .build();
+
+    let raw = String::from_utf8_lossy(&msg.raw);
+    // Trailers should be in the text part
+    assert!(raw.contains("Signed-off-by: Dev <dev@kernel.org>"), "raw = {}", raw);
+
+    // Attachment should still be parseable
+    let attachments = msg.attachments();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].filename, "icon.jpg");
+    assert_eq!(attachments[0].data, data);
+}
+
+#[test]
+fn test_attachment_from_struct() {
+    let att = Attachment::new("report.pdf", "application/pdf", vec![0x25, 0x50, 0x44, 0x46]);
+    assert_eq!(att.filename, "report.pdf");
+    assert_eq!(att.content_type, "application/pdf");
+    assert_eq!(att.data.len(), 4);
 }
