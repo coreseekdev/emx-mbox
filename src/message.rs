@@ -1,0 +1,129 @@
+use chrono::{DateTime, Utc};
+use mailparse::parse_mail;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::fmt;
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
+
+use crate::error::MboxError;
+use crate::format::normalize_line_endings;
+
+/// An owned RFC 5322 message with cached header access.
+#[derive(Clone, Debug)]
+pub struct MailMessage {
+    /// The complete raw message bytes (headers + body), LF line endings.
+    pub raw: Vec<u8>,
+    /// Lazily-populated header cache (lowercased key → original value).
+    headers: RefCell<Option<HashMap<String, String>>>,
+}
+
+impl MailMessage {
+    /// Build a `MailMessage` from raw RFC 5322 bytes.
+    pub fn from_raw(raw: Vec<u8>) -> Self {
+        Self {
+            raw: normalize_line_endings(&raw),
+            headers: RefCell::new(None),
+        }
+    }
+
+    /// Load a single message from an EML file.
+    pub fn from_eml_file<P: AsRef<Path>>(path: P) -> Result<Self, MboxError> {
+        let mut data = Vec::new();
+        File::open(path)?.read_to_end(&mut data)?;
+        Ok(Self::from_raw(data))
+    }
+
+    // -----------------------------------------------------------------------
+    // Header access (cached)
+    // -----------------------------------------------------------------------
+
+    /// Ensure the header cache is populated.
+    fn ensure_headers(&self) {
+        let mut cache = self.headers.borrow_mut();
+        if cache.is_some() {
+            return;
+        }
+        let mut map = HashMap::new();
+        if let Ok(parsed) = parse_mail(&self.raw) {
+            for h in &parsed.headers {
+                let key = h.get_key().to_ascii_lowercase();
+                // Only store the first occurrence of each header.
+                map.entry(key).or_insert_with(|| h.get_value());
+            }
+        }
+        *cache = Some(map);
+    }
+
+    /// Return the value of a header (first occurrence), or `None`.
+    pub fn header(&self, name: &str) -> Option<String> {
+        self.ensure_headers();
+        self.headers
+            .borrow()
+            .as_ref()
+            .and_then(|m| m.get(&name.to_ascii_lowercase()).cloned())
+    }
+
+    /// Return **all** values for a given header name.
+    pub fn headers_all(&self, name: &str) -> Vec<String> {
+        // For multi-value we fall back to a fresh parse (cache stores first only).
+        let key_lower = name.to_ascii_lowercase();
+        parse_mail(&self.raw)
+            .map(|p| {
+                p.headers
+                    .iter()
+                    .filter(|h| h.get_key().to_ascii_lowercase() == key_lower)
+                    .map(|h| h.get_value())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Invalidate the header cache (e.g. after mutating `raw`).
+    pub fn invalidate_cache(&self) {
+        *self.headers.borrow_mut() = None;
+    }
+
+    // -----------------------------------------------------------------------
+    // Shorthand accessors
+    // -----------------------------------------------------------------------
+
+    pub fn from(&self) -> String {
+        self.header("From").unwrap_or_default()
+    }
+
+    pub fn subject(&self) -> String {
+        self.header("Subject").unwrap_or_default()
+    }
+
+    pub fn message_id(&self) -> Option<String> {
+        self.header("Message-ID")
+    }
+
+    pub fn date(&self) -> Option<DateTime<Utc>> {
+        let val = self.header("Date")?;
+        mailparse::dateparse(&val)
+            .ok()
+            .map(|ts| DateTime::from_timestamp(ts, 0).unwrap_or_else(Utc::now))
+    }
+
+    /// Return the decoded body text (first `text/plain` part).
+    pub fn body(&self) -> String {
+        parse_mail(&self.raw)
+            .ok()
+            .and_then(|p| p.get_body().ok())
+            .unwrap_or_default()
+    }
+
+    /// Access to the full parsed mail structure.
+    pub fn parsed(&self) -> Result<mailparse::ParsedMail<'_>, MboxError> {
+        Ok(parse_mail(&self.raw)?)
+    }
+}
+
+impl fmt::Display for MailMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", String::from_utf8_lossy(&self.raw))
+    }
+}
