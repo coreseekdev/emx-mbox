@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut writer = Vec::new();
     let mut mbox_writer = MboxWriter::new(&mut writer);
-    mbox2.save(&mut mbox_writer)?;
+    mbox2.write_to(&mut mbox_writer)?;
 
     println!("\n--- Re-saved mbox ({} messages) ---", mbox2.len());
     println!("{}", String::from_utf8_lossy(&writer));

@@ -7,6 +7,7 @@ use crate::error::MboxError;
 use crate::format::MboxFormat;
 use crate::message::MailMessage;
 use crate::reader::MboxReader;
+use crate::store::MailStore;
 use crate::writer::MboxWriter;
 
 /// In-memory collection of messages with load / save / append.
@@ -88,8 +89,8 @@ impl Mbox {
         self.append_built(MessageBuilder::new(from, subject).body(body));
     }
 
-    /// Save the entire archive to a writer.
-    pub fn save<W: Write>(&self, writer: &mut MboxWriter<W>) -> Result<(), MboxError> {
+    /// Write the entire archive through an `MboxWriter`.
+    pub fn write_to<W: Write>(&self, writer: &mut MboxWriter<W>) -> Result<(), MboxError> {
         for msg in &self.messages {
             writer.write_mail_message(msg)?;
         }
@@ -98,7 +99,7 @@ impl Mbox {
 
     pub fn save_file<P: AsRef<Path>>(&self, path: P) -> Result<(), MboxError> {
         let mut w = MboxWriter::from_file(path)?;
-        self.save(&mut w)
+        self.write_to(&mut w)
     }
 
     /// Append a single message to an existing mbox file on disk.
@@ -111,6 +112,38 @@ impl Mbox {
 impl Default for Mbox {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl MailStore for Mbox {
+    fn load(path: &Path) -> Result<Self, MboxError> {
+        Self::load_file(path)
+    }
+
+    #[inline]
+    fn len(&self) -> usize {
+        self.messages.len()
+    }
+
+    #[inline]
+    fn messages(&self) -> &[MailMessage] {
+        &self.messages
+    }
+
+    fn append(&mut self, msg: MailMessage) {
+        self.messages.push(msg);
+    }
+
+    fn save(&self, path: &Path) -> Result<(), MboxError> {
+        self.save_file(path)
+    }
+
+    fn append_to(path: &Path, msg: &MailMessage) -> Result<(), MboxError> {
+        Self::append_to_file(path, msg)
+    }
+
+    fn detect(path: &Path) -> bool {
+        path.is_file()
     }
 }
 

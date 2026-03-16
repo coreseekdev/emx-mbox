@@ -101,7 +101,7 @@ fn test_attachment_roundtrip_through_mbox() {
     let mut buf = Vec::new();
     {
         let mut writer = MboxWriter::new(&mut buf);
-        mbox.save(&mut writer).unwrap();
+        mbox.write_to(&mut writer).unwrap();
     }
 
     let reloaded = Mbox::load(buf.as_slice()).unwrap();
@@ -135,7 +135,7 @@ fn test_multiple_file_attachments_roundtrip() {
     let mut buf = Vec::new();
     {
         let mut writer = MboxWriter::new(&mut buf);
-        mbox.save(&mut writer).unwrap();
+        mbox.write_to(&mut writer).unwrap();
     }
 
     let reloaded = Mbox::load(buf.as_slice()).unwrap();

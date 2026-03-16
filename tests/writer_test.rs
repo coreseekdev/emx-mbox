@@ -60,7 +60,7 @@ Body content\n";
     let mut buf = Vec::new();
     {
         let mut writer = MboxWriter::new(&mut buf);
-        mbox.save(&mut writer).unwrap();
+        mbox.write_to(&mut writer).unwrap();
     }
 
     let reloaded = Mbox::load(buf.as_slice()).unwrap();
@@ -81,7 +81,7 @@ fn test_from_escape_roundtrip() {
     let mut buf = Vec::new();
     {
         let mut writer = MboxWriter::new(&mut buf);
-        mbox.save(&mut writer).unwrap();
+        mbox.write_to(&mut writer).unwrap();
     }
     let saved = String::from_utf8_lossy(&buf);
     assert!(
@@ -118,7 +118,7 @@ Body\n";
     let mut buf = Vec::new();
     {
         let mut writer = MboxWriter::new(&mut buf);
-        mbox.save(&mut writer).unwrap();
+        mbox.write_to(&mut writer).unwrap();
     }
     let saved = String::from_utf8_lossy(&buf);
     assert!(

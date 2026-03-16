@@ -38,7 +38,7 @@ Hello, world!\n";
     let mut buf = Vec::new();
     {
         let mut writer = MboxWriter::new(&mut buf);
-        mbox.save(&mut writer).unwrap();
+        mbox.write_to(&mut writer).unwrap();
     }
 
     let reloaded = Mbox::load(buf.as_slice()).unwrap();
@@ -78,7 +78,7 @@ done\n";
         let mut mbox = Mbox::new();
         mbox.append(msg);
         let mut writer = MboxWriter::new(&mut buf);
-        mbox.save(&mut writer).unwrap();
+        mbox.write_to(&mut writer).unwrap();
     }
 
     // The raw mbox should have escaped the From lines
@@ -141,7 +141,7 @@ fn test_txtar_fixture_file_as_body_roundtrip() {
     let mut buf = Vec::new();
     {
         let mut writer = MboxWriter::new(&mut buf);
-        mbox.save(&mut writer).unwrap();
+        mbox.write_to(&mut writer).unwrap();
     }
 
     let reloaded = Mbox::load(buf.as_slice()).unwrap();
@@ -195,7 +195,7 @@ fn test_txtar_file_as_attachment_roundtrip() {
     let mut buf = Vec::new();
     {
         let mut writer = MboxWriter::new(&mut buf);
-        mbox.save(&mut writer).unwrap();
+        mbox.write_to(&mut writer).unwrap();
     }
 
     let reloaded = Mbox::load(buf.as_slice()).unwrap();
@@ -235,7 +235,7 @@ From inside a txtar entry after a dash-header\n";
     let mut buf = Vec::new();
     {
         let mut writer = MboxWriter::new(&mut buf);
-        mbox.save(&mut writer).unwrap();
+        mbox.write_to(&mut writer).unwrap();
     }
 
     let reloaded = Mbox::load(buf.as_slice()).unwrap();
@@ -280,7 +280,7 @@ From the start\n\
     let mut buf = Vec::new();
     {
         let mut writer = MboxWriter::new(&mut buf).with_format(MboxFormat::Mboxo);
-        mbox.save(&mut writer).unwrap();
+        mbox.write_to(&mut writer).unwrap();
     }
 
     let raw = String::from_utf8_lossy(&buf);
@@ -322,7 +322,7 @@ fn test_multiple_txtar_messages_in_mbox() {
     let mut buf = Vec::new();
     {
         let mut writer = MboxWriter::new(&mut buf);
-        mbox.save(&mut writer).unwrap();
+        mbox.write_to(&mut writer).unwrap();
     }
 
     let reloaded = Mbox::load(buf.as_slice()).unwrap();
@@ -364,7 +364,7 @@ This txtar contains an embedded mbox file.\n";
     let mut buf = Vec::new();
     {
         let mut writer = MboxWriter::new(&mut buf);
-        mbox.save(&mut writer).unwrap();
+        mbox.write_to(&mut writer).unwrap();
     }
 
     let reloaded = Mbox::load(buf.as_slice()).unwrap();

@@ -68,7 +68,7 @@ fn test_multi_message_roundtrip() {
     let mut buf = Vec::new();
     {
         let mut writer = MboxWriter::new(&mut buf);
-        mbox.save(&mut writer).unwrap();
+        mbox.write_to(&mut writer).unwrap();
     }
 
     let reloaded = Mbox::load(buf.as_slice()).unwrap();
