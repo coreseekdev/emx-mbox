@@ -1,0 +1,38 @@
+This is a txtar archive comment.
+The archive contains multiple files for testing mbox compatibility.
+
+-- hello.go --
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("Hello, world!")
+}
+-- mail/From_header.txt --
+From the very beginning of time,
+people have used email.
+
+From sender@example.com - this looks like an mbox separator!
+>From escaped in mboxrd style already
+
+This file tests the From-line edge case.
+-- config.toml --
+[server]
+host = "0.0.0.0"
+port = 8080
+
+# Dashes in content should be fine
+---
+-- this-is-not-a-separator
+--- also fine ---
+-- empty.txt --
+-- README.md --
+# Test Project
+
+This is a multi-file txtar archive.
+
+Lines with dashes:
+---
+----
+-- not-a-file-header (no trailing --)
