@@ -1,0 +1,10 @@
+[package]
+name = "emx-mbox"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = "0.4"
+mailparse = "0.16"
+thiserror = "2.0"
+uuid = { version = "1", features = ["v4"] }
