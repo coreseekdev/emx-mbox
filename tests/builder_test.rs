@@ -54,7 +54,7 @@ fn test_builder_trailers() {
         .acked_by("Acker <ack@kernel.org>")
         .build();
 
-    let body = String::from_utf8_lossy(&msg.raw);
+    let body = String::from_utf8_lossy(msg.raw());
     assert!(body.contains("Signed-off-by: Dev <dev@kernel.org>"), "body = {}", body);
     assert!(body.contains("Reviewed-by: Reviewer <rev@kernel.org>"), "body = {}", body);
     assert!(body.contains("Acked-by: Acker <ack@kernel.org>"), "body = {}", body);
@@ -67,6 +67,6 @@ fn test_builder_custom_trailer() {
         .trailer("Tested-by", "QA <qa@example.com>")
         .build();
 
-    let body = String::from_utf8_lossy(&msg.raw);
+    let body = String::from_utf8_lossy(msg.raw());
     assert!(body.contains("Tested-by: QA <qa@example.com>"), "body = {}", body);
 }

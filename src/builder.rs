@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::Path;
 
 use base64::Engine;
@@ -6,45 +5,9 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::{DateTime, Local, Utc};
 use uuid::Uuid;
 
+use crate::attachment::Attachment;
+use crate::error::MboxError;
 use crate::message::MailMessage;
-
-/// A file attachment with content and metadata.
-pub struct Attachment {
-    /// The filename (e.g. `image.png`).
-    pub filename: String,
-    /// MIME type (e.g. `image/png`). Auto-detected if not specified.
-    pub content_type: String,
-    /// Raw file content.
-    pub data: Vec<u8>,
-}
-
-impl Attachment {
-    /// Create an attachment from raw bytes.
-    pub fn new(filename: impl Into<String>, content_type: impl Into<String>, data: Vec<u8>) -> Self {
-        Self {
-            filename: filename.into(),
-            content_type: content_type.into(),
-            data,
-        }
-    }
-
-    /// Create an attachment by reading a file from disk.
-    /// MIME type is guessed from the file extension.
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, std::io::Error> {
-        let path = path.as_ref();
-        let filename = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "attachment".into());
-        let content_type = guess_mime(&filename);
-        let data = fs::read(path)?;
-        Ok(Self {
-            filename,
-            content_type,
-            data,
-        })
-    }
-}
 
 /// Construct RFC 5322 messages suitable for b4 / git-am workflows.
 pub struct MessageBuilder {
@@ -142,7 +105,7 @@ impl MessageBuilder {
     }
 
     /// Attach a file by path. MIME type is guessed from the extension.
-    pub fn attach_file<P: AsRef<Path>>(mut self, path: P) -> Result<Self, std::io::Error> {
+    pub fn attach_file<P: AsRef<Path>>(mut self, path: P) -> Result<Self, MboxError> {
         self.attachments.push(Attachment::from_file(path)?);
         Ok(self)
     }
@@ -305,36 +268,4 @@ fn format_trailer(name: &str, value: &str) -> String {
 fn generate_boundary() -> String {
     let uuid = Uuid::new_v4();
     format!("----=_emx_{}", uuid.as_simple())
-}
-
-/// Guess MIME type from file extension.
-fn guess_mime(filename: &str) -> String {
-    let ext = filename
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    match ext.as_str() {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "svg" => "image/svg+xml",
-        "webp" => "image/webp",
-        "bmp" => "image/bmp",
-        "ico" => "image/x-icon",
-        "pdf" => "application/pdf",
-        "zip" => "application/zip",
-        "gz" | "gzip" => "application/gzip",
-        "tar" => "application/x-tar",
-        "txt" => "text/plain",
-        "html" | "htm" => "text/html",
-        "css" => "text/css",
-        "js" => "application/javascript",
-        "json" => "application/json",
-        "xml" => "application/xml",
-        "csv" => "text/csv",
-        "patch" | "diff" => "text/x-patch",
-        _ => "application/octet-stream",
-    }
-    .into()
 }

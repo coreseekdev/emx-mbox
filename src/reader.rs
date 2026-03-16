@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 
 use crate::error::MboxError;
-use crate::format::{is_from_line, normalize_line_endings, unescape_from_line};
+use crate::format::{is_from_line, normalize_line_endings, unescape_from_line, MboxFormat};
 use crate::message::MailMessage;
 
 /// Raw result from `next_raw` — envelope info plus message bytes.
@@ -18,6 +18,7 @@ pub struct RawMessage {
 /// Streaming mbox reader — yields one message at a time.
 pub struct MboxReader<R: Read> {
     reader: BufReader<R>,
+    format: MboxFormat,
     started: bool,
     at_eof: bool,
     /// The most recently consumed `From ` line.
@@ -35,10 +36,16 @@ impl<R: Read> MboxReader<R> {
     pub fn new(reader: R) -> Self {
         Self {
             reader: BufReader::new(reader),
+            format: MboxFormat::default(),
             started: false,
             at_eof: false,
             last_envelope: String::new(),
         }
+    }
+
+    pub fn with_format(mut self, format: MboxFormat) -> Self {
+        self.format = format;
+        self
     }
 
     /// Return the raw bytes of the next message together with the envelope
@@ -112,7 +119,7 @@ impl<R: Read> MboxReader<R> {
                 message.extend_from_slice(&blank);
             }
 
-            let unescaped = unescape_from_line(trimmed.as_bytes());
+            let unescaped = unescape_from_line(trimmed.as_bytes(), self.format);
             message.extend_from_slice(unescaped);
             message.push(b'\n');
         }
@@ -131,7 +138,7 @@ impl<R: Read> MboxReader<R> {
         match self.next_raw()? {
             Some(raw_msg) => {
                 let mut msg = MailMessage::from_raw(raw_msg.data);
-                msg.envelope_from = parse_envelope_from(&raw_msg.envelope);
+                msg.set_envelope_from(parse_envelope_from(&raw_msg.envelope));
                 Ok(Some(msg))
             }
             None => Ok(None),

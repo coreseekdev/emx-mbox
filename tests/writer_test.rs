@@ -111,7 +111,7 @@ Body\n";
 
     let mbox = Mbox::load(mbox_data.as_bytes()).unwrap();
     assert_eq!(
-        mbox.messages()[0].envelope_from.as_deref(),
+        mbox.messages()[0].envelope_from(),
         Some("custom@kernel.org")
     );
 
@@ -129,7 +129,7 @@ Body\n";
 
     let reloaded = Mbox::load(buf.as_slice()).unwrap();
     assert_eq!(
-        reloaded.messages()[0].envelope_from.as_deref(),
+        reloaded.messages()[0].envelope_from(),
         Some("custom@kernel.org")
     );
 }

@@ -38,15 +38,27 @@ pub fn is_escaped_from(line: &[u8]) -> bool {
 }
 
 /// Strip exactly one leading `>` from an mboxrd-escaped `>+From ` line.
+/// For mboxo this is a no-op (mboxo never escapes with `>`).
 #[inline]
-pub fn unescape_from_line(line: &[u8]) -> &[u8] {
-    if line.starts_with(b">") {
-        let rest = &line[1..];
-        if rest.starts_with(FROM_PREFIX) || is_escaped_from(rest) {
-            return rest;
+pub fn unescape_from_line<'a>(line: &'a [u8], format: MboxFormat) -> &'a [u8] {
+    match format {
+        MboxFormat::Mboxrd => {
+            if line.starts_with(b">") {
+                let rest = &line[1..];
+                if rest.starts_with(FROM_PREFIX) || is_escaped_from(rest) {
+                    return rest;
+                }
+            }
+            line
+        }
+        MboxFormat::Mboxo => {
+            // mboxo: strip a single `>` only if the remainder is bare `From `.
+            if line.starts_with(b">") && line[1..].starts_with(FROM_PREFIX) {
+                return &line[1..];
+            }
+            line
         }
     }
-    line
 }
 
 /// Escape a line for mboxrd: if the line starts with `>*From `, prepend `>`.
@@ -128,11 +140,20 @@ mod tests {
 
     #[test]
     fn test_unescape_from_line() {
-        assert_eq!(unescape_from_line(b">From x"), b"From x");
-        assert_eq!(unescape_from_line(b">>From x"), b">From x");
-        assert_eq!(unescape_from_line(b">>>From x"), b">>From x");
-        assert_eq!(unescape_from_line(b"normal line"), b"normal line");
-        assert_eq!(unescape_from_line(b">Not from"), b">Not from");
+        assert_eq!(unescape_from_line(b">From x", MboxFormat::Mboxrd), b"From x");
+        assert_eq!(unescape_from_line(b">>From x", MboxFormat::Mboxrd), b">From x");
+        assert_eq!(unescape_from_line(b">>>From x", MboxFormat::Mboxrd), b">>From x");
+        assert_eq!(unescape_from_line(b"normal line", MboxFormat::Mboxrd), b"normal line");
+        assert_eq!(unescape_from_line(b">Not from", MboxFormat::Mboxrd), b">Not from");
+    }
+
+    #[test]
+    fn test_unescape_from_line_mboxo() {
+        // mboxo only unescapes >From (one level)
+        assert_eq!(unescape_from_line(b">From x", MboxFormat::Mboxo), b"From x");
+        // >>From stays as-is in mboxo (it was never escaped by mboxo)
+        assert_eq!(unescape_from_line(b">>From x", MboxFormat::Mboxo), b">>From x");
+        assert_eq!(unescape_from_line(b"normal line", MboxFormat::Mboxo), b"normal line");
     }
 
     #[test]

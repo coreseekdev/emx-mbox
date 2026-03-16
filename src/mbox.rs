@@ -4,6 +4,7 @@ use std::path::Path;
 
 use crate::builder::MessageBuilder;
 use crate::error::MboxError;
+use crate::format::MboxFormat;
 use crate::message::MailMessage;
 use crate::reader::MboxReader;
 use crate::writer::MboxWriter;
@@ -23,6 +24,16 @@ impl Mbox {
     /// Load an mbox archive from a reader.
     pub fn load<R: Read>(reader: R) -> Result<Self, MboxError> {
         let reader = MboxReader::new(reader);
+        let mut messages = Vec::new();
+        for result in reader {
+            messages.push(result?);
+        }
+        Ok(Self { messages })
+    }
+
+    /// Load an mbox archive from a reader with a specific format.
+    pub fn load_with_format<R: Read>(reader: R, format: MboxFormat) -> Result<Self, MboxError> {
+        let reader = MboxReader::new(reader).with_format(format);
         let mut messages = Vec::new();
         for result in reader {
             messages.push(result?);
@@ -100,5 +111,23 @@ impl Mbox {
 impl Default for Mbox {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<'a> IntoIterator for &'a Mbox {
+    type Item = &'a MailMessage;
+    type IntoIter = std::slice::Iter<'a, MailMessage>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.messages.iter()
+    }
+}
+
+impl IntoIterator for Mbox {
+    type Item = MailMessage;
+    type IntoIter = std::vec::IntoIter<MailMessage>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.messages.into_iter()
     }
 }

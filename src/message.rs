@@ -7,7 +7,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use crate::builder::Attachment;
+use crate::attachment::Attachment;
 use crate::error::MboxError;
 use crate::format::normalize_line_endings;
 
@@ -15,11 +15,11 @@ use crate::format::normalize_line_endings;
 #[derive(Clone, Debug)]
 pub struct MailMessage {
     /// The complete raw message bytes (headers + body), LF line endings.
-    pub raw: Vec<u8>,
+    raw: Vec<u8>,
     /// The sender from the mbox envelope `From ` line (if loaded from mbox).
-    pub envelope_from: Option<String>,
-    /// Lazily-populated header cache (lowercased key → original value).
-    headers: RefCell<Option<HashMap<String, String>>>,
+    envelope_from: Option<String>,
+    /// Lazily-populated header cache (lowercased key → all values).
+    headers: RefCell<Option<HashMap<String, Vec<String>>>>,
 }
 
 impl MailMessage {
@@ -40,6 +40,33 @@ impl MailMessage {
     }
 
     // -----------------------------------------------------------------------
+    // Raw / envelope access
+    // -----------------------------------------------------------------------
+
+    /// The complete raw message bytes.
+    #[inline]
+    pub fn raw(&self) -> &[u8] {
+        &self.raw
+    }
+
+    /// Replace the raw bytes and auto-invalidate the header cache.
+    pub fn set_raw(&mut self, raw: Vec<u8>) {
+        self.raw = normalize_line_endings(&raw);
+        *self.headers.borrow_mut() = None;
+    }
+
+    /// The sender from the mbox envelope `From ` line, if present.
+    #[inline]
+    pub fn envelope_from(&self) -> Option<&str> {
+        self.envelope_from.as_deref()
+    }
+
+    /// Set the envelope sender.
+    pub fn set_envelope_from(&mut self, envelope: Option<String>) {
+        self.envelope_from = envelope;
+    }
+
+    // -----------------------------------------------------------------------
     // Header access (cached)
     // -----------------------------------------------------------------------
 
@@ -49,12 +76,11 @@ impl MailMessage {
         if cache.is_some() {
             return;
         }
-        let mut map = HashMap::new();
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
         if let Ok(parsed) = parse_mail(&self.raw) {
             for h in &parsed.headers {
                 let key = h.get_key().to_ascii_lowercase();
-                // Only store the first occurrence of each header.
-                map.entry(key).or_insert_with(|| h.get_value());
+                map.entry(key).or_default().push(h.get_value());
             }
         }
         *cache = Some(map);
@@ -66,27 +92,18 @@ impl MailMessage {
         self.headers
             .borrow()
             .as_ref()
-            .and_then(|m| m.get(&name.to_ascii_lowercase()).cloned())
+            .and_then(|m| m.get(&name.to_ascii_lowercase()))
+            .and_then(|v| v.first().cloned())
     }
 
-    /// Return **all** values for a given header name.
+    /// Return **all** values for a given header name (from cache, no re-parse).
     pub fn headers_all(&self, name: &str) -> Vec<String> {
-        // For multi-value we fall back to a fresh parse (cache stores first only).
-        let key_lower = name.to_ascii_lowercase();
-        parse_mail(&self.raw)
-            .map(|p| {
-                p.headers
-                    .iter()
-                    .filter(|h| h.get_key().to_ascii_lowercase() == key_lower)
-                    .map(|h| h.get_value())
-                    .collect()
-            })
+        self.ensure_headers();
+        self.headers
+            .borrow()
+            .as_ref()
+            .and_then(|m| m.get(&name.to_ascii_lowercase()).cloned())
             .unwrap_or_default()
-    }
-
-    /// Invalidate the header cache (e.g. after mutating `raw`).
-    pub fn invalidate_cache(&self) {
-        *self.headers.borrow_mut() = None;
     }
 
     // -----------------------------------------------------------------------
@@ -114,7 +131,7 @@ impl MailMessage {
 
     /// Return the decoded body text (first `text/plain` part).
     pub fn body(&self) -> String {
-        parse_mail(&self.raw)
+        parse_mail(self.raw())
             .ok()
             .and_then(|p| p.get_body().ok())
             .unwrap_or_default()
@@ -122,13 +139,13 @@ impl MailMessage {
 
     /// Access to the full parsed mail structure.
     pub fn parsed(&self) -> Result<mailparse::ParsedMail<'_>, MboxError> {
-        Ok(parse_mail(&self.raw)?)
+        Ok(parse_mail(self.raw())?)
     }
 
     /// Extract attachments from a MIME multipart message.
     /// Returns an empty Vec for plain-text messages.
     pub fn attachments(&self) -> Vec<Attachment> {
-        let parsed = match parse_mail(&self.raw) {
+        let parsed = match parse_mail(self.raw()) {
             Ok(p) => p,
             Err(_) => return Vec::new(),
         };
@@ -141,7 +158,7 @@ impl MailMessage {
 
 impl fmt::Display for MailMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", String::from_utf8_lossy(&self.raw))
+        write!(f, "{}", String::from_utf8_lossy(self.raw()))
     }
 }
 

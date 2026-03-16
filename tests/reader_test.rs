@@ -137,7 +137,7 @@ Body with CRLF\r\n";
     let body = mbox.messages()[0].body();
     assert!(body.contains("Body with CRLF"));
     assert!(
-        !mbox.messages()[0].raw.windows(2).any(|w| w == b"\r\n"),
+        !mbox.messages()[0].raw().windows(2).any(|w| w == b"\r\n"),
         "raw data should not contain CRLF"
     );
 }
@@ -157,7 +157,7 @@ Body\n";
     let mbox = Mbox::load(mbox_data.as_bytes()).unwrap();
     let msg = &mbox.messages()[0];
     assert_eq!(
-        msg.envelope_from.as_deref(),
+        msg.envelope_from(),
         Some("custom-sender@kernel.org"),
     );
     assert_eq!(msg.from(), "Display Name <display@example.com>");

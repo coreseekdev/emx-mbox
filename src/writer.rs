@@ -91,14 +91,14 @@ impl<W: Write> MboxWriter<W> {
     pub fn write_mail_message(&mut self, msg: &MailMessage) -> Result<(), MboxError> {
         let date = msg.date().unwrap_or_else(Utc::now);
         let envelope = msg
-            .envelope_from
-            .clone()
+            .envelope_from()
+            .map(|s| s.to_owned())
             .or_else(|| {
                 msg.header("From")
                     .and_then(|v| extract_email_address(&v))
             })
             .unwrap_or_else(|| "mboxrd@z".into());
-        self.write_message(&envelope, &date, &msg.raw)
+        self.write_message(&envelope, &date, msg.raw())
     }
 }
 

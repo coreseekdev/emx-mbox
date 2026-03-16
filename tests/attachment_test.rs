@@ -180,7 +180,7 @@ fn test_attachment_with_trailers() {
         .signed_off_by("Dev <dev@kernel.org>")
         .build();
 
-    let raw = String::from_utf8_lossy(&msg.raw);
+    let raw = String::from_utf8_lossy(msg.raw());
     assert!(
         raw.contains("Signed-off-by: Dev <dev@kernel.org>"),
         "raw = {}",
