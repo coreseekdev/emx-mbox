@@ -15,6 +15,7 @@ pub struct MessageBuilder {
     references: Vec<String>,
     date: Option<DateTime<Utc>>,
     extra_headers: Vec<(String, String)>,
+    trailers: Vec<(String, String)>,
 }
 
 impl MessageBuilder {
@@ -30,6 +31,7 @@ impl MessageBuilder {
             references: Vec::new(),
             date: None,
             extra_headers: Vec::new(),
+            trailers: Vec::new(),
         }
     }
 
@@ -71,6 +73,27 @@ impl MessageBuilder {
     pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.extra_headers.push((name.into(), value.into()));
         self
+    }
+
+    /// Add a trailer line (appended after the body, e.g. `Signed-off-by`).
+    pub fn trailer(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.trailers.push((name.into(), value.into()));
+        self
+    }
+
+    /// Shorthand for `Signed-off-by` trailer.
+    pub fn signed_off_by(self, value: impl Into<String>) -> Self {
+        self.trailer("Signed-off-by", value)
+    }
+
+    /// Shorthand for `Reviewed-by` trailer.
+    pub fn reviewed_by(self, value: impl Into<String>) -> Self {
+        self.trailer("Reviewed-by", value)
+    }
+
+    /// Shorthand for `Acked-by` trailer.
+    pub fn acked_by(self, value: impl Into<String>) -> Self {
+        self.trailer("Acked-by", value)
     }
 
     /// Build a `[PATCH vN M/N]` style subject prefix.
@@ -133,7 +156,23 @@ impl MessageBuilder {
         // Blank line separating headers from body.
         raw.push('\n');
         raw.push_str(&self.body);
-        if !self.body.ends_with('\n') {
+        if !self.body.is_empty() && !self.body.ends_with('\n') {
+            raw.push('\n');
+        }
+
+        // Trailers (after body, before final newline).
+        if !self.trailers.is_empty() {
+            // Ensure a blank line before trailers if body doesn't end with one.
+            if !self.body.is_empty() && !self.body.ends_with("\n\n") {
+                // Body already has a trailing \n from above; no extra blank needed
+                // unless body is missing the separator. Trailers follow directly.
+            }
+            for (name, value) in &self.trailers {
+                raw.push_str(&format!("{}\n", format_trailer(name, value)));
+            }
+        }
+
+        if !raw.ends_with('\n') {
             raw.push('\n');
         }
 
@@ -144,4 +183,9 @@ impl MessageBuilder {
 fn generate_message_id() -> String {
     let uuid = Uuid::new_v4();
     format!("<{}.emx@localhost>", uuid)
+}
+
+/// Format a trailer line: `Name: value`.
+fn format_trailer(name: &str, value: &str) -> String {
+    format!("{}: {}", name, value)
 }

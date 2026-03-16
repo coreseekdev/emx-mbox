@@ -6,11 +6,22 @@ use crate::error::MboxError;
 use crate::format::{is_from_line, normalize_line_endings, unescape_from_line};
 use crate::message::MailMessage;
 
+/// Raw result from `next_raw` — envelope info plus message bytes.
+pub struct RawMessage {
+    /// The full `From ` separator line (without trailing newline).
+    /// e.g. `From sender@example.com Thu Jan  1 00:00:00 1970`
+    pub envelope: String,
+    /// Message bytes (headers + body, without the envelope line).
+    pub data: Vec<u8>,
+}
+
 /// Streaming mbox reader — yields one message at a time.
 pub struct MboxReader<R: Read> {
     reader: BufReader<R>,
     started: bool,
     at_eof: bool,
+    /// The most recently consumed `From ` line.
+    last_envelope: String,
 }
 
 impl MboxReader<File> {
@@ -26,12 +37,13 @@ impl<R: Read> MboxReader<R> {
             reader: BufReader::new(reader),
             started: false,
             at_eof: false,
+            last_envelope: String::new(),
         }
     }
 
-    /// Return the raw bytes of the next message (headers + body, without the
-    /// envelope `From ` line).  Returns `Ok(None)` at end of archive.
-    pub fn next_raw(&mut self) -> Result<Option<Vec<u8>>, MboxError> {
+    /// Return the raw bytes of the next message together with the envelope
+    /// `From ` line.  Returns `Ok(None)` at end of archive.
+    pub fn next_raw(&mut self) -> Result<Option<RawMessage>, MboxError> {
         if self.at_eof {
             return Ok(None);
         }
@@ -50,6 +62,7 @@ impl<R: Read> MboxReader<R> {
                     continue; // skip leading blank lines
                 }
                 if is_from_line(trimmed.as_bytes()) {
+                    self.last_envelope = trimmed.to_string();
                     self.started = true;
                     break;
                 } else {
@@ -90,6 +103,7 @@ impl<R: Read> MboxReader<R> {
 
             if is_from_line(trimmed.as_bytes()) {
                 // Next message starts here. Drop the buffered blank line.
+                self.last_envelope = trimmed.to_string();
                 break;
             }
 
@@ -106,13 +120,20 @@ impl<R: Read> MboxReader<R> {
         if message.is_empty() {
             return Ok(None);
         }
-        Ok(Some(message))
+        Ok(Some(RawMessage {
+            envelope: self.last_envelope.clone(),
+            data: message,
+        }))
     }
 
     /// Convenience: parse the next message and return a `MailMessage`.
     pub fn next_message(&mut self) -> Result<Option<MailMessage>, MboxError> {
         match self.next_raw()? {
-            Some(raw) => Ok(Some(MailMessage::from_raw(raw))),
+            Some(raw_msg) => {
+                let mut msg = MailMessage::from_raw(raw_msg.data);
+                msg.envelope_from = parse_envelope_from(&raw_msg.envelope);
+                Ok(Some(msg))
+            }
             None => Ok(None),
         }
     }
@@ -128,5 +149,18 @@ impl<R: Read> Iterator for MboxReader<R> {
             Ok(None) => None,
             Err(e) => Some(Err(e)),
         }
+    }
+}
+
+/// Parse the sender address from a `From ` envelope line.
+/// Input: `From sender@example.com Thu Jan  1 00:00:00 1970`
+/// Output: `Some("sender@example.com")`
+fn parse_envelope_from(envelope: &str) -> Option<String> {
+    let rest = envelope.strip_prefix("From ")?;
+    let sender = rest.split_whitespace().next()?;
+    if sender.is_empty() {
+        None
+    } else {
+        Some(sender.to_string())
     }
 }

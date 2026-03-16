@@ -15,6 +15,8 @@ use crate::format::normalize_line_endings;
 pub struct MailMessage {
     /// The complete raw message bytes (headers + body), LF line endings.
     pub raw: Vec<u8>,
+    /// The sender from the mbox envelope `From ` line (if loaded from mbox).
+    pub envelope_from: Option<String>,
     /// Lazily-populated header cache (lowercased key → original value).
     headers: RefCell<Option<HashMap<String, String>>>,
 }
@@ -24,6 +26,7 @@ impl MailMessage {
     pub fn from_raw(raw: Vec<u8>) -> Self {
         Self {
             raw: normalize_line_endings(&raw),
+            envelope_from: None,
             headers: RefCell::new(None),
         }
     }

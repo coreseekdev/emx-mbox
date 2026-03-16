@@ -1,5 +1,5 @@
 use chrono::{TimeZone, Utc};
-use emx_mbox::{Mbox, MboxWriter, MailMessage, MessageBuilder, MboxFormat};
+use emx_mbox::{Mbox, MboxReader, MboxWriter, MailMessage, MessageBuilder, MboxFormat};
 
 // -----------------------------------------------------------------------
 // Basic parsing
@@ -351,4 +351,175 @@ Para 3\n";
     assert!(body.contains("Para 1"));
     assert!(body.contains("Para 2"));
     assert!(body.contains("Para 3"));
+}
+
+// -----------------------------------------------------------------------
+// Envelope From preservation
+// -----------------------------------------------------------------------
+
+#[test]
+fn test_envelope_from_preserved() {
+    let mbox_data = "From custom-sender@kernel.org Thu Jan  1 00:00:00 1970\n\
+From: Display Name <display@example.com>\n\
+Subject: Test\n\
+\n\
+Body\n";
+
+    let mbox = Mbox::load(mbox_data.as_bytes()).unwrap();
+    let msg = &mbox.messages()[0];
+    assert_eq!(
+        msg.envelope_from.as_deref(),
+        Some("custom-sender@kernel.org"),
+        "envelope_from should be preserved from the From line"
+    );
+    // The header From is different
+    assert_eq!(msg.from(), "Display Name <display@example.com>");
+}
+
+#[test]
+fn test_envelope_from_roundtrip() {
+    let mbox_data = "From custom@kernel.org Thu Jan  1 00:00:00 1970\n\
+From: Display <display@ex.com>\n\
+Subject: Test\n\
+Date: Thu, 01 Jan 1970 00:00:00 +0000\n\
+\n\
+Body\n";
+
+    let mbox = Mbox::load(mbox_data.as_bytes()).unwrap();
+    assert_eq!(mbox.messages()[0].envelope_from.as_deref(), Some("custom@kernel.org"));
+
+    // Save and reload — writer should use envelope_from
+    let mut buf = Vec::new();
+    {
+        let mut writer = MboxWriter::new(&mut buf);
+        mbox.save(&mut writer).unwrap();
+    }
+    let saved = String::from_utf8_lossy(&buf);
+    assert!(
+        saved.starts_with("From custom@kernel.org "),
+        "writer should use envelope_from: {}",
+        saved
+    );
+
+    let reloaded = Mbox::load(buf.as_slice()).unwrap();
+    assert_eq!(
+        reloaded.messages()[0].envelope_from.as_deref(),
+        Some("custom@kernel.org")
+    );
+}
+
+// -----------------------------------------------------------------------
+// CRLF input handling
+// -----------------------------------------------------------------------
+
+#[test]
+fn test_crlf_input() {
+    let mbox_data = "From alice@example.com Mon Mar 16 10:00:00 2026\r\n\
+From: alice@example.com\r\n\
+Subject: CRLF Test\r\n\
+\r\n\
+Body with CRLF\r\n";
+
+    let mbox = Mbox::load(mbox_data.as_bytes()).unwrap();
+    assert_eq!(mbox.len(), 1);
+    assert_eq!(mbox.messages()[0].subject(), "CRLF Test");
+    let body = mbox.messages()[0].body();
+    assert!(body.contains("Body with CRLF"));
+    // Internal storage should be LF-only
+    assert!(
+        !mbox.messages()[0].raw.windows(2).any(|w| w == b"\r\n"),
+        "raw data should not contain CRLF"
+    );
+}
+
+// -----------------------------------------------------------------------
+// Iterator interface
+// -----------------------------------------------------------------------
+
+#[test]
+fn test_iterator_interface() {
+    let mbox_data = "\
+From a@example.com Thu Jan  1 00:00:00 1970\n\
+From: a@example.com\n\
+Subject: First\n\
+\n\
+Body 1\n\
+\n\
+From b@example.com Thu Jan  2 00:00:00 1970\n\
+From: b@example.com\n\
+Subject: Second\n\
+\n\
+Body 2\n";
+
+    let reader = MboxReader::new(mbox_data.as_bytes());
+    let subjects: Vec<String> = reader
+        .map(|r| r.unwrap().subject())
+        .collect();
+    assert_eq!(subjects, vec!["First", "Second"]);
+}
+
+// -----------------------------------------------------------------------
+// Multi-message roundtrip
+// -----------------------------------------------------------------------
+
+#[test]
+fn test_multi_message_roundtrip() {
+    let mut mbox = Mbox::new();
+    for i in 0..5 {
+        let msg = MessageBuilder::new(
+            format!("user{}@example.com", i),
+            format!("Message {}", i),
+        )
+        .body(format!("Body of message {}\n", i))
+        .build();
+        mbox.append(msg);
+    }
+
+    let mut buf = Vec::new();
+    {
+        let mut writer = MboxWriter::new(&mut buf);
+        mbox.save(&mut writer).unwrap();
+    }
+
+    let reloaded = Mbox::load(buf.as_slice()).unwrap();
+    assert_eq!(reloaded.len(), 5);
+    for i in 0..5 {
+        assert_eq!(
+            reloaded.messages()[i].subject(),
+            format!("Message {}", i)
+        );
+        assert!(reloaded.messages()[i]
+            .body()
+            .contains(&format!("Body of message {}", i)));
+    }
+}
+
+// -----------------------------------------------------------------------
+// Builder trailers
+// -----------------------------------------------------------------------
+
+#[test]
+fn test_builder_trailers() {
+    let msg = MessageBuilder::new("dev@kernel.org", "[PATCH] Fix something")
+        .body("Patch description\n\n---\ndiff goes here\n")
+        .signed_off_by("Dev <dev@kernel.org>")
+        .reviewed_by("Reviewer <rev@kernel.org>")
+        .acked_by("Acker <ack@kernel.org>")
+        .build();
+
+    let body = String::from_utf8_lossy(&msg.raw);
+    assert!(body.contains("Signed-off-by: Dev <dev@kernel.org>"), "body = {}", body);
+    assert!(body.contains("Reviewed-by: Reviewer <rev@kernel.org>"), "body = {}", body);
+    assert!(body.contains("Acked-by: Acker <ack@kernel.org>"), "body = {}", body);
+}
+
+#[test]
+fn test_builder_custom_trailer() {
+    let msg = MessageBuilder::new("dev@kernel.org", "Test")
+        .body("Body\n")
+        .trailer("Tested-by", "QA <qa@example.com>")
+        .build();
+
+    let body = String::from_utf8_lossy(&msg.raw);
+    assert!(body.contains("Tested-by: QA <qa@example.com>"), "body = {}", body);
 }
