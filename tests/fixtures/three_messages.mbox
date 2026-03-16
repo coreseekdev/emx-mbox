@@ -1,0 +1,20 @@
+From herp@example.com Thu Jan  1 00:00:01 2015
+From: herp@example.com
+Subject: First
+Date: Thu, 01 Jan 2015 00:00:01 +0000
+
+Body 1
+
+From derp@example.com Thu Jan  2 00:00:01 2015
+From: derp@example.com
+Subject: Second
+Date: Fri, 02 Jan 2015 00:00:01 +0000
+
+Body 2
+
+From bernd@example.com Thu Jan  3 00:00:01 2015
+From: bernd@example.com
+Subject: Third
+Date: Sat, 03 Jan 2015 00:00:01 +0000
+
+Body 3
