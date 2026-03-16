@@ -1,25 +1,41 @@
 use chrono::{DateTime, Utc};
 use mailparse::parse_mail;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use crate::attachment::Attachment;
-use crate::error::MboxError;
+use crate::error::MailError;
 use crate::format::normalize_line_endings;
 
 /// An owned RFC 5322 message with cached header access.
-#[derive(Clone, Debug)]
+///
+/// Header lookups and body text are cached on first access via `OnceLock`,
+/// making `MailMessage` both `Send` and `Sync`.
+#[derive(Debug)]
 pub struct MailMessage {
     /// The complete raw message bytes (headers + body), LF line endings.
     raw: Vec<u8>,
     /// The sender from the mbox envelope `From ` line (if loaded from mbox).
     envelope_from: Option<String>,
     /// Lazily-populated header cache (lowercased key → all values).
-    headers: RefCell<Option<HashMap<String, Vec<String>>>>,
+    headers: OnceLock<HashMap<String, Vec<String>>>,
+    /// Cached decoded body text.
+    body_cache: OnceLock<String>,
+}
+
+impl Clone for MailMessage {
+    fn clone(&self) -> Self {
+        Self {
+            raw: self.raw.clone(),
+            envelope_from: self.envelope_from.clone(),
+            headers: OnceLock::new(),
+            body_cache: OnceLock::new(),
+        }
+    }
 }
 
 impl MailMessage {
@@ -28,12 +44,13 @@ impl MailMessage {
         Self {
             raw: normalize_line_endings(&raw),
             envelope_from: None,
-            headers: RefCell::new(None),
+            headers: OnceLock::new(),
+            body_cache: OnceLock::new(),
         }
     }
 
     /// Load a single message from an EML file.
-    pub fn from_eml_file<P: AsRef<Path>>(path: P) -> Result<Self, MboxError> {
+    pub fn from_eml_file<P: AsRef<Path>>(path: P) -> Result<Self, MailError> {
         let mut data = Vec::new();
         File::open(path)?.read_to_end(&mut data)?;
         Ok(Self::from_raw(data))
@@ -52,7 +69,8 @@ impl MailMessage {
     /// Replace the raw bytes and auto-invalidate the header cache.
     pub fn set_raw(&mut self, raw: Vec<u8>) {
         self.raw = normalize_line_endings(&raw);
-        *self.headers.borrow_mut() = None;
+        self.headers = OnceLock::new();
+        self.body_cache = OnceLock::new();
     }
 
     /// The sender from the mbox envelope `From ` line, if present.
@@ -70,75 +88,77 @@ impl MailMessage {
     // Header access (cached)
     // -----------------------------------------------------------------------
 
-    /// Ensure the header cache is populated.
-    fn ensure_headers(&self) {
-        let mut cache = self.headers.borrow_mut();
-        if cache.is_some() {
-            return;
-        }
+    /// Return a reference to the lazily-populated header map.
+    fn ensure_headers(&self) -> &HashMap<String, Vec<String>> {
+        let raw = &self.raw;
+        self.headers.get_or_init(|| Self::parse_headers(raw))
+    }
+
+    fn parse_headers(raw: &[u8]) -> HashMap<String, Vec<String>> {
         let mut map: HashMap<String, Vec<String>> = HashMap::new();
-        if let Ok(parsed) = parse_mail(&self.raw) {
+        if let Ok(parsed) = parse_mail(raw) {
             for h in &parsed.headers {
                 let key = h.get_key().to_ascii_lowercase();
                 map.entry(key).or_default().push(h.get_value());
             }
         }
-        *cache = Some(map);
+        map
     }
 
-    /// Return the value of a header (first occurrence), or `None`.
-    pub fn header(&self, name: &str) -> Option<String> {
-        self.ensure_headers();
-        self.headers
-            .borrow()
-            .as_ref()
-            .and_then(|m| m.get(&name.to_ascii_lowercase()))
-            .and_then(|v| v.first().cloned())
+    /// Return the first value of a header, or `None`.
+    /// The returned `&str` borrows from the internal cache — zero copy.
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.ensure_headers()
+            .get(&name.to_ascii_lowercase())
+            .and_then(|v| v.first())
+            .map(|s| s.as_str())
     }
 
-    /// Return **all** values for a given header name (from cache, no re-parse).
-    pub fn headers_all(&self, name: &str) -> Vec<String> {
-        self.ensure_headers();
-        self.headers
-            .borrow()
-            .as_ref()
-            .and_then(|m| m.get(&name.to_ascii_lowercase()).cloned())
-            .unwrap_or_default()
+    /// Return **all** values for a given header name (zero-copy from cache).
+    pub fn headers_all(&self, name: &str) -> &[String] {
+        self.ensure_headers()
+            .get(&name.to_ascii_lowercase())
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     // -----------------------------------------------------------------------
     // Shorthand accessors
     // -----------------------------------------------------------------------
 
-    pub fn from(&self) -> String {
+    pub fn from(&self) -> &str {
         self.header("From").unwrap_or_default()
     }
 
-    pub fn subject(&self) -> String {
+    pub fn subject(&self) -> &str {
         self.header("Subject").unwrap_or_default()
     }
 
-    pub fn message_id(&self) -> Option<String> {
+    pub fn message_id(&self) -> Option<&str> {
         self.header("Message-ID")
     }
 
     pub fn date(&self) -> Option<DateTime<Utc>> {
         let val = self.header("Date")?;
-        mailparse::dateparse(&val)
+        mailparse::dateparse(val)
             .ok()
             .map(|ts| DateTime::from_timestamp(ts, 0).unwrap_or_else(Utc::now))
     }
 
     /// Return the decoded body text (first `text/plain` part).
-    pub fn body(&self) -> String {
-        parse_mail(self.raw())
-            .ok()
-            .and_then(|p| p.get_body().ok())
-            .unwrap_or_default()
+    /// Cached on first access — subsequent calls are zero-cost.
+    pub fn body(&self) -> &str {
+        let raw = &self.raw;
+        self.body_cache.get_or_init(|| {
+            parse_mail(raw)
+                .ok()
+                .and_then(|p| p.get_body().ok())
+                .unwrap_or_default()
+        })
     }
 
     /// Access to the full parsed mail structure.
-    pub fn parsed(&self) -> Result<mailparse::ParsedMail<'_>, MboxError> {
+    pub fn parsed(&self) -> Result<mailparse::ParsedMail<'_>, MailError> {
         Ok(parse_mail(self.raw())?)
     }
 
@@ -173,8 +193,7 @@ fn collect_attachments(part: &mailparse::ParsedMail<'_>, out: &mut Vec<Attachmen
 
     if let Some(ref disp) = disposition {
         if disp.starts_with("attachment") {
-            let filename = extract_param(disp, "filename")
-                .unwrap_or_else(|| "attachment".into());
+            let filename = extract_param(disp, "filename").unwrap_or("attachment");
             let content_type = part
                 .ctype
                 .mimetype
@@ -195,17 +214,23 @@ fn collect_attachments(part: &mailparse::ParsedMail<'_>, out: &mut Vec<Attachmen
 
 /// Extract a named parameter from a header value like
 /// `attachment; filename="foo.png"`.
-fn extract_param(header_value: &str, param_name: &str) -> Option<String> {
-    let needle = format!("{}=", param_name);
-    let pos = header_value.find(&needle)?;
-    let rest = &header_value[pos + needle.len()..];
-    if rest.starts_with('"') {
-        // Quoted value
-        let end = rest[1..].find('"')?;
-        Some(rest[1..1 + end].to_string())
-    } else {
-        // Unquoted — take until `;` or end
-        let end = rest.find(';').unwrap_or(rest.len());
-        Some(rest[..end].trim().to_string())
+///
+/// Splits on `;` to avoid partial matches (e.g. `name` vs `filename`).
+fn extract_param<'a>(header_value: &'a str, param_name: &str) -> Option<&'a str> {
+    for part in header_value.split(';').skip(1) {
+        let part = part.trim();
+        if let Some(rest) = part.strip_prefix(param_name) {
+            let rest = rest.trim_start();
+            if let Some(val) = rest.strip_prefix('=') {
+                let val = val.trim_start();
+                if let Some(inner) = val.strip_prefix('"') {
+                    let end = inner.find('"')?;
+                    return Some(&inner[..end]);
+                } else {
+                    return Some(val);
+                }
+            }
+        }
     }
+    None
 }

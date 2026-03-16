@@ -11,11 +11,11 @@ mod writer;
 
 pub use attachment::Attachment;
 pub use builder::MessageBuilder;
-pub use error::MboxError;
+pub use error::MailError;
 pub use format::MboxFormat;
 pub use maildir::Maildir;
 pub use mbox::Mbox;
 pub use message::MailMessage;
 pub use reader::MboxReader;
-pub use store::MailStore;
+pub use store::{open, MailStore};
 pub use writer::MboxWriter;

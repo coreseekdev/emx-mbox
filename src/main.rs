@@ -1,4 +1,4 @@
-use emx_mbox::{Mbox, MboxWriter, MessageBuilder};
+use emx_mbox::{MailStore, Mbox, MboxWriter, MessageBuilder};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sample_email = concat!(
@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("\n--- Message {} ---", i + 1);
         println!("From: {}", msg.from());
         println!("Subject: {}", msg.subject());
-        println!("Message-ID: {}", msg.message_id().unwrap_or_default());
+        println!("Message-ID: {}", msg.message_id().unwrap_or(""));
         println!("Body: {}", msg.body());
     }
 

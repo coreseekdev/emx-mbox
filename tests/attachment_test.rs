@@ -1,4 +1,4 @@
-use emx_mbox::{Attachment, Mbox, MboxWriter, MessageBuilder};
+use emx_mbox::{Attachment, MailStore, Mbox, MboxWriter, MessageBuilder};
 
 use std::path::PathBuf;
 

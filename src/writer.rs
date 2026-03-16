@@ -3,7 +3,7 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 
-use crate::error::MboxError;
+use crate::error::MailError;
 use crate::format::{escape_from_line, normalize_line_endings, extract_email_address, MboxFormat};
 use crate::message::MailMessage;
 
@@ -14,13 +14,13 @@ pub struct MboxWriter<W: Write> {
 }
 
 impl MboxWriter<File> {
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, MboxError> {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, MailError> {
         let file = File::create(path)?;
         Ok(Self::new(file))
     }
 
     /// Open for append — does not truncate the file.
-    pub fn open_append<P: AsRef<Path>>(path: P) -> Result<Self, MboxError> {
+    pub fn open_append<P: AsRef<Path>>(path: P) -> Result<Self, MailError> {
         let file = OpenOptions::new().create(true).append(true).open(path)?;
         Ok(Self {
             writer: file,
@@ -51,7 +51,7 @@ impl<W: Write> MboxWriter<W> {
         envelope_from: &str,
         date: &DateTime<Utc>,
         raw_message: &[u8],
-    ) -> Result<(), MboxError> {
+    ) -> Result<(), MailError> {
         let from = if envelope_from.is_empty() {
             "mboxrd@z"
         } else {
@@ -88,7 +88,7 @@ impl<W: Write> MboxWriter<W> {
     }
 
     /// Convenience: write a `MailMessage`.
-    pub fn write_mail_message(&mut self, msg: &MailMessage) -> Result<(), MboxError> {
+    pub fn write_mail_message(&mut self, msg: &MailMessage) -> Result<(), MailError> {
         let date = msg.date().unwrap_or_else(Utc::now);
         let envelope = msg
             .envelope_from()

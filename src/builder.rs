@@ -6,7 +6,7 @@ use chrono::{DateTime, Local, Utc};
 use uuid::Uuid;
 
 use crate::attachment::Attachment;
-use crate::error::MboxError;
+use crate::error::MailError;
 use crate::message::MailMessage;
 
 /// Construct RFC 5322 messages suitable for b4 / git-am workflows.
@@ -105,7 +105,7 @@ impl MessageBuilder {
     }
 
     /// Attach a file by path. MIME type is guessed from the extension.
-    pub fn attach_file<P: AsRef<Path>>(mut self, path: P) -> Result<Self, MboxError> {
+    pub fn attach_file<P: AsRef<Path>>(mut self, path: P) -> Result<Self, MailError> {
         self.attachments.push(Attachment::from_file(path)?);
         Ok(self)
     }

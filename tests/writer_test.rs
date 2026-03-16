@@ -1,5 +1,5 @@
 use chrono::{TimeZone, Utc};
-use emx_mbox::{Mbox, MboxWriter, MailMessage, MessageBuilder, MboxFormat};
+use emx_mbox::{MailStore, Mbox, MboxWriter, MailMessage, MessageBuilder, MboxFormat};
 
 // -----------------------------------------------------------------------
 // Writer format

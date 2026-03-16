@@ -1,4 +1,4 @@
-use emx_mbox::{Mbox, MboxWriter, MailMessage, MessageBuilder};
+use emx_mbox::{MailStore, Mbox, MboxWriter, MailMessage, MessageBuilder};
 
 use std::path::PathBuf;
 

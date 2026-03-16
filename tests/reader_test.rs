@@ -1,4 +1,4 @@
-use emx_mbox::{Mbox, MboxReader};
+use emx_mbox::{MailStore, Mbox, MboxReader};
 
 use std::path::PathBuf;
 
@@ -183,14 +183,14 @@ Subject: Second\n\
 Body 2\n";
 
     let reader = MboxReader::new(mbox_data.as_bytes());
-    let subjects: Vec<String> = reader.map(|r| r.unwrap().subject()).collect();
+    let subjects: Vec<String> = reader.map(|r| r.unwrap().subject().to_owned()).collect();
     assert_eq!(subjects, vec!["First", "Second"]);
 }
 
 #[test]
 fn test_iterator_from_file() {
     let reader = MboxReader::from_file(fixture("three_messages.mbox")).unwrap();
-    let subjects: Vec<String> = reader.map(|r| r.unwrap().subject()).collect();
+    let subjects: Vec<String> = reader.map(|r| r.unwrap().subject().to_owned()).collect();
     assert_eq!(subjects, vec!["First", "Second", "Third"]);
 }
 

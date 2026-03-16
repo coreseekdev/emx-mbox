@@ -3,7 +3,7 @@
 /// txtar (Go testscript archive) uses `-- filename --` delimiters.
 /// mbox only escapes lines starting with `From ` (mboxo) or `>*From ` (mboxrd).
 /// These are completely orthogonal — but we verify edge cases here.
-use emx_mbox::{Mbox, MboxWriter, MessageBuilder, MboxFormat};
+use emx_mbox::{MailStore, Mbox, MboxWriter, MessageBuilder, MboxFormat};
 
 use std::path::PathBuf;
 

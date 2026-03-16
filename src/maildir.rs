@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::error::MboxError;
+use crate::error::MailError;
 use crate::message::MailMessage;
 use crate::store::MailStore;
 
@@ -36,11 +36,11 @@ impl Maildir {
         p.join("new").is_dir() && p.join("cur").is_dir() && p.join("tmp").is_dir()
     }
 
-    /// Ensure `new/`, `cur/`, `tmp/` exist under the root.
-    fn ensure_dirs(&self) -> Result<(), MboxError> {
-        fs::create_dir_all(self.root.join("new"))?;
-        fs::create_dir_all(self.root.join("cur"))?;
-        fs::create_dir_all(self.root.join("tmp"))?;
+    /// Ensure `new/`, `cur/`, `tmp/` exist under the given root.
+    fn ensure_dirs(root: &Path) -> Result<(), MailError> {
+        fs::create_dir_all(root.join("new"))?;
+        fs::create_dir_all(root.join("cur"))?;
+        fs::create_dir_all(root.join("tmp"))?;
         Ok(())
     }
 
@@ -49,17 +49,35 @@ impl Maildir {
     /// Pattern: `{counter:04}_{subject_slug}.eml`
     fn message_filename(msg: &MailMessage, index: usize) -> String {
         let subject = msg.subject();
-        let (counter, slug) = parse_patch_subject(&subject, index);
+        let (counter, slug) = parse_patch_subject(subject, index);
         format!("{:04}_{}.eml", counter, slug)
     }
 
     /// Write a single message atomically: tmp → new.
-    fn write_message_atomic(&self, msg: &MailMessage, index: usize) -> Result<(), MboxError> {
-        let filename = Self::message_filename(msg, index);
-        let tmp_path = self.root.join("tmp").join(&filename);
-        let new_path = self.root.join("new").join(&filename);
+    /// If the target filename already exists in `new/`, a suffix is appended
+    /// to avoid silently overwriting data.
+    fn write_message_atomic(root: &Path, msg: &MailMessage, index: usize) -> Result<(), MailError> {
+        let base_name = Self::message_filename(msg, index);
+        let new_path = root.join("new").join(&base_name);
+        let (final_new, final_name) = if !new_path.exists() {
+            (new_path, base_name)
+        } else {
+            // Append _1, _2, … to deduplicate
+            let stem = base_name.trim_end_matches(".eml");
+            let mut found = None;
+            for i in 1u32..10000 {
+                let alt = format!("{}_{}.eml", stem, i);
+                let alt_path = root.join("new").join(&alt);
+                if !alt_path.exists() {
+                    found = Some((alt_path, alt));
+                    break;
+                }
+            }
+            found.ok_or_else(|| MailError::InvalidFormat("too many filename collisions".into()))?
+        };
+        let tmp_path = root.join("tmp").join(&final_name);
         fs::write(&tmp_path, msg.raw())?;
-        fs::rename(&tmp_path, &new_path)?;
+        fs::rename(&tmp_path, &final_new)?;
         Ok(())
     }
 
@@ -69,17 +87,17 @@ impl Maildir {
     }
 
     /// Append from an EML file on disk.
-    pub fn append_eml<P: AsRef<Path>>(&mut self, path: P) -> Result<(), MboxError> {
+    pub fn append_eml<P: AsRef<Path>>(&mut self, path: P) -> Result<(), MailError> {
         self.messages.push(MailMessage::from_eml_file(path)?);
         Ok(())
     }
 }
 
 impl MailStore for Maildir {
-    fn load(path: &Path) -> Result<Self, MboxError> {
+    fn load(path: &Path) -> Result<Self, MailError> {
         let root = path.to_path_buf();
         if !Self::is_maildir(&root) {
-            return Err(MboxError::InvalidFormat(
+            return Err(MailError::InvalidFormat(
                 "not a maildir (missing new/, cur/, tmp/)".into(),
             ));
         }
@@ -93,11 +111,7 @@ impl MailStore for Maildir {
             }
             let mut entries: Vec<_> = fs::read_dir(&dir)?
                 .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.path()
-                        .extension()
-                        .map_or(false, |ext| ext == "eml")
-                })
+                .filter(|e| e.path().is_file())
                 .collect();
             // Sort by filename for deterministic order.
             entries.sort_by_key(|e| e.file_name());
@@ -123,21 +137,16 @@ impl MailStore for Maildir {
         self.messages.push(msg);
     }
 
-    fn save(&self, path: &Path) -> Result<(), MboxError> {
-        let target = Self {
-            root: path.to_path_buf(),
-            messages: Vec::new(),
-        };
-        target.ensure_dirs()?;
+    fn save(&self, path: &Path) -> Result<(), MailError> {
+        Self::ensure_dirs(path)?;
         for (i, msg) in self.messages.iter().enumerate() {
-            target.write_message_atomic(msg, i)?;
+            Self::write_message_atomic(path, msg, i)?;
         }
         Ok(())
     }
 
-    fn append_to(path: &Path, msg: &MailMessage) -> Result<(), MboxError> {
-        let dir = Maildir::new(path);
-        dir.ensure_dirs()?;
+    fn append_to(path: &Path, msg: &MailMessage) -> Result<(), MailError> {
+        Self::ensure_dirs(path)?;
         // Count existing messages for index hint.
         let count = fs::read_dir(path.join("new"))
             .map(|rd| rd.count())
@@ -145,7 +154,7 @@ impl MailStore for Maildir {
             + fs::read_dir(path.join("cur"))
                 .map(|rd| rd.count())
                 .unwrap_or(0);
-        dir.write_message_atomic(msg, count)?;
+        Self::write_message_atomic(path, msg, count)?;
         Ok(())
     }
 

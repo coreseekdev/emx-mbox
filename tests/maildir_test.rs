@@ -155,10 +155,10 @@ fn test_mbox_to_maildir_roundtrip() {
     assert_eq!(loaded.len(), 3);
 
     // Verify all subjects are preserved
-    let subjects: Vec<_> = loaded.messages().iter().map(|m| m.subject()).collect();
+    let subjects: Vec<&str> = loaded.messages().iter().map(|m| m.subject()).collect();
     for msg in mbox.messages() {
         assert!(
-            subjects.iter().any(|s| s == &msg.subject()),
+            subjects.iter().any(|s| *s == msg.subject()),
             "Missing subject: {}",
             msg.subject()
         );
@@ -206,8 +206,8 @@ fn test_mail_store_trait_polymorphism() {
         store.len()
     }
 
-    fn first_subject(store: &dyn MailStore) -> String {
-        store.messages().first().map(|m| m.subject()).unwrap_or_default()
+    fn first_subject<'a>(store: &'a dyn MailStore) -> &'a str {
+        store.messages().first().map(|m| m.subject()).unwrap_or("")
     }
 
     // Mbox via trait
@@ -252,7 +252,7 @@ fn test_maildir_into_iterator() {
     assert_eq!(count, 2);
 
     // Owned iteration
-    let subjects: Vec<String> = md.into_iter().map(|m| m.subject()).collect();
+    let subjects: Vec<String> = md.into_iter().map(|m| m.subject().to_owned()).collect();
     assert_eq!(subjects.len(), 2);
 }
 

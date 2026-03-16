@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use crate::builder::MessageBuilder;
-use crate::error::MboxError;
+use crate::error::MailError;
 use crate::format::MboxFormat;
 use crate::message::MailMessage;
 use crate::reader::MboxReader;
@@ -23,7 +23,7 @@ impl Mbox {
     }
 
     /// Load an mbox archive from a reader.
-    pub fn load<R: Read>(reader: R) -> Result<Self, MboxError> {
+    pub fn load<R: Read>(reader: R) -> Result<Self, MailError> {
         let reader = MboxReader::new(reader);
         let mut messages = Vec::new();
         for result in reader {
@@ -33,7 +33,7 @@ impl Mbox {
     }
 
     /// Load an mbox archive from a reader with a specific format.
-    pub fn load_with_format<R: Read>(reader: R, format: MboxFormat) -> Result<Self, MboxError> {
+    pub fn load_with_format<R: Read>(reader: R, format: MboxFormat) -> Result<Self, MailError> {
         let reader = MboxReader::new(reader).with_format(format);
         let mut messages = Vec::new();
         for result in reader {
@@ -42,30 +42,9 @@ impl Mbox {
         Ok(Self { messages })
     }
 
-    pub fn load_file<P: AsRef<Path>>(path: P) -> Result<Self, MboxError> {
+    pub fn load_file<P: AsRef<Path>>(path: P) -> Result<Self, MailError> {
         let file = File::open(path)?;
         Self::load(file)
-    }
-
-    pub fn messages(&self) -> &[MailMessage] {
-        &self.messages
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &MailMessage> {
-        self.messages.iter()
-    }
-
-    pub fn len(&self) -> usize {
-        self.messages.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.messages.is_empty()
-    }
-
-    /// Append a pre-built `MailMessage`.
-    pub fn append(&mut self, msg: MailMessage) {
-        self.messages.push(msg);
     }
 
     /// Append raw RFC 5322 bytes (e.g. from an EML file or network).
@@ -74,7 +53,7 @@ impl Mbox {
     }
 
     /// Append from an EML file on disk.
-    pub fn append_eml<P: AsRef<Path>>(&mut self, path: P) -> Result<(), MboxError> {
+    pub fn append_eml<P: AsRef<Path>>(&mut self, path: P) -> Result<(), MailError> {
         self.messages.push(MailMessage::from_eml_file(path)?);
         Ok(())
     }
@@ -90,20 +69,20 @@ impl Mbox {
     }
 
     /// Write the entire archive through an `MboxWriter`.
-    pub fn write_to<W: Write>(&self, writer: &mut MboxWriter<W>) -> Result<(), MboxError> {
+    pub fn write_to<W: Write>(&self, writer: &mut MboxWriter<W>) -> Result<(), MailError> {
         for msg in &self.messages {
             writer.write_mail_message(msg)?;
         }
         Ok(())
     }
 
-    pub fn save_file<P: AsRef<Path>>(&self, path: P) -> Result<(), MboxError> {
+    pub fn save_file<P: AsRef<Path>>(&self, path: P) -> Result<(), MailError> {
         let mut w = MboxWriter::from_file(path)?;
         self.write_to(&mut w)
     }
 
     /// Append a single message to an existing mbox file on disk.
-    pub fn append_to_file<P: AsRef<Path>>(path: P, msg: &MailMessage) -> Result<(), MboxError> {
+    pub fn append_to_file<P: AsRef<Path>>(path: P, msg: &MailMessage) -> Result<(), MailError> {
         let mut w = MboxWriter::open_append(path)?;
         w.write_mail_message(msg)
     }
@@ -116,7 +95,7 @@ impl Default for Mbox {
 }
 
 impl MailStore for Mbox {
-    fn load(path: &Path) -> Result<Self, MboxError> {
+    fn load(path: &Path) -> Result<Self, MailError> {
         Self::load_file(path)
     }
 
@@ -134,16 +113,24 @@ impl MailStore for Mbox {
         self.messages.push(msg);
     }
 
-    fn save(&self, path: &Path) -> Result<(), MboxError> {
+    fn save(&self, path: &Path) -> Result<(), MailError> {
         self.save_file(path)
     }
 
-    fn append_to(path: &Path, msg: &MailMessage) -> Result<(), MboxError> {
+    fn append_to(path: &Path, msg: &MailMessage) -> Result<(), MailError> {
         Self::append_to_file(path, msg)
     }
 
     fn detect(path: &Path) -> bool {
-        path.is_file()
+        use std::io::Read;
+        if !path.is_file() {
+            return false;
+        }
+        let Ok(mut f) = File::open(path) else {
+            return false;
+        };
+        let mut buf = [0u8; 5];
+        f.read_exact(&mut buf).is_ok() && buf == *b"From "
     }
 }
 

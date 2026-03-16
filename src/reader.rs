@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 
-use crate::error::MboxError;
+use crate::error::MailError;
 use crate::format::{is_from_line, normalize_line_endings, unescape_from_line, MboxFormat};
 use crate::message::MailMessage;
 
@@ -26,7 +26,7 @@ pub struct MboxReader<R: Read> {
 }
 
 impl MboxReader<File> {
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, MboxError> {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, MailError> {
         let file = File::open(path)?;
         Ok(Self::new(file))
     }
@@ -50,7 +50,7 @@ impl<R: Read> MboxReader<R> {
 
     /// Return the raw bytes of the next message together with the envelope
     /// `From ` line.  Returns `Ok(None)` at end of archive.
-    pub fn next_raw(&mut self) -> Result<Option<RawMessage>, MboxError> {
+    pub fn next_raw(&mut self) -> Result<Option<RawMessage>, MailError> {
         if self.at_eof {
             return Ok(None);
         }
@@ -73,12 +73,16 @@ impl<R: Read> MboxReader<R> {
                     self.started = true;
                     break;
                 } else {
-                    return Err(MboxError::InvalidFormat(
+                    return Err(MailError::InvalidFormat(
                         "expected mbox From separator".into(),
                     ));
                 }
             }
         }
+
+        // Save the envelope for the current message before phase 2
+        // overwrites it with the *next* message's separator.
+        let envelope = std::mem::take(&mut self.last_envelope);
 
         // Phase 2: collect message lines until the next separator or EOF.
         let mut message = Vec::new();
@@ -124,17 +128,19 @@ impl<R: Read> MboxReader<R> {
             message.push(b'\n');
         }
 
-        if message.is_empty() {
+        // Empty data at true EOF means no more messages.
+        if message.is_empty() && self.at_eof {
             return Ok(None);
         }
+
         Ok(Some(RawMessage {
-            envelope: self.last_envelope.clone(),
+            envelope,
             data: message,
         }))
     }
 
     /// Convenience: parse the next message and return a `MailMessage`.
-    pub fn next_message(&mut self) -> Result<Option<MailMessage>, MboxError> {
+    pub fn next_message(&mut self) -> Result<Option<MailMessage>, MailError> {
         match self.next_raw()? {
             Some(raw_msg) => {
                 let mut msg = MailMessage::from_raw(raw_msg.data);
@@ -148,7 +154,7 @@ impl<R: Read> MboxReader<R> {
 
 /// Iterator adapter so you can write `for msg in reader { ... }`.
 impl<R: Read> Iterator for MboxReader<R> {
-    type Item = Result<MailMessage, MboxError>;
+    type Item = Result<MailMessage, MailError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.next_message() {

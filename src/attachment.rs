@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use crate::error::MboxError;
+use crate::error::MailError;
 
 /// A file attachment with content and metadata.
 pub struct Attachment {
@@ -25,7 +25,7 @@ impl Attachment {
 
     /// Create an attachment by reading a file from disk.
     /// MIME type is guessed from the file extension.
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, MboxError> {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, MailError> {
         let path = path.as_ref();
         let filename = path
             .file_name()
