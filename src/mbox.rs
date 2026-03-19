@@ -10,7 +10,10 @@ use crate::reader::MboxReader;
 use crate::store::MailStore;
 use crate::writer::MboxWriter;
 
-/// In-memory collection of messages with load / save / append.
+/// In-memory collection of messages with load / append operations.
+///
+/// This module follows the **append-only** principle for mbox files.
+/// Use `append_to_file` for writing messages to disk.
 pub struct Mbox {
     messages: Vec<MailMessage>,
 }
@@ -76,11 +79,6 @@ impl Mbox {
         Ok(())
     }
 
-    pub fn save_file<P: AsRef<Path>>(&self, path: P) -> Result<(), MailError> {
-        let mut w = MboxWriter::from_file(path)?;
-        self.write_to(&mut w)
-    }
-
     /// Append a single message to an existing mbox file on disk.
     pub fn append_to_file<P: AsRef<Path>>(path: P, msg: &MailMessage) -> Result<(), MailError> {
         let mut w = MboxWriter::open_append(path)?;
@@ -111,10 +109,6 @@ impl MailStore for Mbox {
 
     fn append(&mut self, msg: MailMessage) {
         self.messages.push(msg);
-    }
-
-    fn save(&self, path: &Path) -> Result<(), MailError> {
-        self.save_file(path)
     }
 
     fn append_to(path: &Path, msg: &MailMessage) -> Result<(), MailError> {

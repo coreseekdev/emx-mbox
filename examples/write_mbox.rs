@@ -56,14 +56,12 @@ Body of the second message.\n";
         println!("  {}: {}", msg.from(), msg.subject());
     }
 
-    // ── High-level: Mbox.save_file() ───────────────────────────────────
-    println!("\n--- High-level Mbox.save_file() ---");
-    let mut mbox = Mbox::new();
-    mbox.append(MailMessage::from_raw(raw_msg1.to_vec()));
-    mbox.append(MailMessage::from_raw(raw_msg2.to_vec()));
+    // ── Append messages using append_to_file (append-only) ─────────────────────
+    println!("\n--- Append messages using append_to_file (append-only) ---");
     let dest2 = format!("{}.2", dest);
-    mbox.save_file(&dest2)?;
-    println!("Saved {} messages to {}", mbox.len(), dest2);
+    Mbox::append_to_file(&dest2, &MailMessage::from_raw(raw_msg1.to_vec()))?;
+    Mbox::append_to_file(&dest2, &MailMessage::from_raw(raw_msg2.to_vec()))?;
+    println!("Appended 2 messages to {}", dest2);
 
     Ok(())
 }

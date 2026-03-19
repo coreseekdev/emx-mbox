@@ -32,9 +32,6 @@ pub trait MailStore {
     /// Append a pre-built message.
     fn append(&mut self, msg: MailMessage);
 
-    /// Save the entire store to `path`, replacing any previous content.
-    fn save(&self, path: &Path) -> Result<(), MailError>;
-
     /// Append a single message to an existing store on disk.
     fn append_to(path: &Path, msg: &MailMessage) -> Result<(), MailError>
     where

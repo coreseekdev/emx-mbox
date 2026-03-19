@@ -15,7 +15,8 @@ Linux kernel patch workflows (b4 / git-am).
   separator line
 - **CRLF normalisation** — input with `\r\n` is stored internally as `\n`
 - Append messages from raw bytes, `.eml` files, or via the builder API
-- In-memory collection (`Mbox`) for load / append / save workflows
+- Append-only file operations — messages can only be appended, not overwritten
+- In-memory collection (`Mbox`) for load / append workflows
 
 ## Quick start
 
@@ -48,10 +49,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build();
 
     // --- Append to an mbox file -----------------------------------------------
-    let mut mbox = Mbox::new();
-    mbox.append(msg);
-    mbox.append_eml("another.eml")?;
-    mbox.save_file("out.mbox")?;
+    // Append messages directly to file (append-only)
+    Mbox::append_to_file("out.mbox", &msg)?;
+    let mbox = Mbox::load_file("another.eml")?;
+    for msg in mbox.messages() {
+        Mbox::append_to_file("out.mbox", msg)?;
+    }
 
     // --- Writer with explicit format ------------------------------------------
     let mut buf = Vec::new();
@@ -72,7 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `MboxWriter<W>` | Streaming writer; `write_message()` / `write_mail_message()` |
 | `MailMessage` | Owned RFC 5322 message with cached header access |
 | `MessageBuilder` | Fluent API for constructing messages (b4-compatible) |
-| `Mbox` | In-memory message collection with load / append / save |
+| `Mbox` | In-memory message collection with load / append / append_to_file |
 | `MboxFormat` | `Mboxrd` (default) or `Mboxo` |
 | `MboxError` | Error type (`Io`, `Parse`, `InvalidFormat`) |
 

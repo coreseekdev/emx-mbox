@@ -137,14 +137,6 @@ impl MailStore for Maildir {
         self.messages.push(msg);
     }
 
-    fn save(&self, path: &Path) -> Result<(), MailError> {
-        Self::ensure_dirs(path)?;
-        for (i, msg) in self.messages.iter().enumerate() {
-            Self::write_message_atomic(path, msg, i)?;
-        }
-        Ok(())
-    }
-
     fn append_to(path: &Path, msg: &MailMessage) -> Result<(), MailError> {
         Self::ensure_dirs(path)?;
         // Count existing messages for index hint.

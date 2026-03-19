@@ -3,9 +3,14 @@ name = "emx-mbox"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "emx-mbox"
+path = "src/bin/emx-mbox.rs"
+
 [dependencies]
 base64 = "0.22"
 chrono = "0.4"
+clap = { version = "4", features = ["derive"] }
 mailparse = "0.16"
 thiserror = "2.0"
 uuid = { version = "1", features = ["v4"] }

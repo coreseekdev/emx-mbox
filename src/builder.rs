@@ -58,6 +58,12 @@ impl MessageBuilder {
         self
     }
 
+    /// Add an extra custom header
+    pub fn extra_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.extra_headers.push((name.into(), value.into()));
+        self
+    }
+
     pub fn message_id(mut self, id: impl Into<String>) -> Self {
         self.message_id = Some(id.into());
         self
