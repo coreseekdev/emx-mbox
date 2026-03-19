@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use emx_mbox::{Maildir, MailStore, Mbox, MessageBuilder, MboxWriter};
+use emx_mbox::{Maildir, MailMessage, MailStore, Mbox, MessageBuilder, MboxWriter};
 
 fn tmp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join("emx_mbox_test").join(name);
@@ -24,19 +24,15 @@ fn fixture(name: &str) -> PathBuf {
 fn test_maildir_save_and_load() {
     let dir = tmp_dir("save_and_load");
 
-    let mut md = Maildir::new(&dir);
-    md.append(
-        MessageBuilder::new("alice@example.com", "[PATCH 1/2] Fix bug")
-            .body("Bug fix\n")
-            .build(),
-    );
-    md.append(
-        MessageBuilder::new("bob@example.com", "[PATCH 2/2] Add feature")
-            .body("Feature\n")
-            .build(),
-    );
+    let msg1 = MessageBuilder::new("alice@example.com", "[PATCH 1/2] Fix bug")
+        .body("Bug fix\n")
+        .build();
+    let msg2 = MessageBuilder::new("bob@example.com", "[PATCH 2/2] Add feature")
+        .body("Feature\n")
+        .build();
 
-    md.save(dir.as_path()).unwrap();
+    Maildir::append_to(dir.as_path(), &msg1).unwrap();
+    Maildir::append_to(dir.as_path(), &msg2).unwrap();
 
     // Verify directory structure
     assert!(dir.join("new").is_dir());
@@ -61,19 +57,15 @@ fn test_maildir_save_and_load() {
 fn test_maildir_b4_compatible_filenames() {
     let dir = tmp_dir("b4_filenames");
 
-    let mut md = Maildir::new(&dir);
-    md.append(
-        MessageBuilder::new("dev@kernel.org", "[PATCH v3 0/4] Series: my cool fix")
-            .body("Cover letter\n")
-            .build(),
-    );
-    md.append(
-        MessageBuilder::new("dev@kernel.org", "[PATCH v3 1/4] Fix null pointer")
-            .body("Fix\n")
-            .build(),
-    );
+    let msg1 = MessageBuilder::new("dev@kernel.org", "[PATCH v3 0/4] Series: my cool fix")
+        .body("Cover letter\n")
+        .build();
+    let msg2 = MessageBuilder::new("dev@kernel.org", "[PATCH v3 1/4] Fix null pointer")
+        .body("Fix\n")
+        .build();
 
-    md.save(dir.as_path()).unwrap();
+    Maildir::append_to(dir.as_path(), &msg1).unwrap();
+    Maildir::append_to(dir.as_path(), &msg2).unwrap();
 
     let mut files: Vec<String> = fs::read_dir(dir.join("new"))
         .unwrap()
@@ -105,13 +97,10 @@ fn test_maildir_append_to_existing() {
     let dir = tmp_dir("append_to");
 
     // Create initial maildir with one message
-    let mut md = Maildir::new(&dir);
-    md.append(
-        MessageBuilder::new("alice@example.com", "First")
-            .body("First\n")
-            .build(),
-    );
-    md.save(dir.as_path()).unwrap();
+    let msg1 = MessageBuilder::new("alice@example.com", "First")
+        .body("First\n")
+        .build();
+    Maildir::append_to(dir.as_path(), &msg1).unwrap();
     assert_eq!(Maildir::load(dir.as_path()).unwrap().len(), 1);
 
     // Append another message
@@ -144,11 +133,9 @@ fn test_mbox_to_maildir_roundtrip() {
     assert_eq!(mbox.len(), 3);
 
     // Transfer to maildir
-    let mut md = Maildir::new(&dir);
     for msg in mbox.messages() {
-        md.append(msg.clone());
+        Maildir::append_to(dir.as_path(), msg).unwrap();
     }
-    md.save(dir.as_path()).unwrap();
 
     // Load back from maildir
     let loaded = Maildir::load(dir.as_path()).unwrap();
@@ -169,14 +156,11 @@ fn test_mbox_to_maildir_roundtrip() {
 fn test_maildir_to_mbox_roundtrip() {
     let dir = tmp_dir("maildir_to_mbox");
 
-    // Build a maildir
-    let mut md = Maildir::new(&dir);
-    md.append(
-        MessageBuilder::new("alice@a.com", "[PATCH 1/1] My change")
-            .body("diff --git a/file\n")
-            .build(),
-    );
-    md.save(dir.as_path()).unwrap();
+    // Write a message to maildir
+    let msg = MessageBuilder::new("alice@a.com", "[PATCH 1/1] My change")
+        .body("diff --git a/file\n")
+        .build();
+    Maildir::append_to(dir.as_path(), &msg).unwrap();
 
     // Load from maildir, write as mbox
     let loaded = Maildir::load(dir.as_path()).unwrap();
@@ -216,13 +200,10 @@ fn test_mail_store_trait_polymorphism() {
     assert_eq!(count_messages(&mbox), 3);
 
     // Maildir via trait
-    let mut md = Maildir::new(&dir);
-    md.append(
-        MessageBuilder::new("test@test.com", "Trait test")
-            .body("body\n")
-            .build(),
-    );
-    md.save(dir.as_path()).unwrap();
+    let msg = MessageBuilder::new("test@test.com", "Trait test")
+        .body("body\n")
+        .build();
+    Maildir::append_to(dir.as_path(), &msg).unwrap();
     let md_loaded = Maildir::load(dir.as_path()).unwrap();
     assert_eq!(count_messages(&md_loaded), 1);
     assert_eq!(first_subject(&md_loaded), "Trait test");
@@ -272,9 +253,7 @@ fn test_maildir_attachment_roundtrip() {
         .unwrap()
         .build();
 
-    let mut md = Maildir::new(&dir);
-    md.append(msg);
-    md.save(dir.as_path()).unwrap();
+    Maildir::append_to(dir.as_path(), &msg).unwrap();
 
     let loaded = Maildir::load(dir.as_path()).unwrap();
     assert_eq!(loaded.len(), 1);
@@ -292,12 +271,10 @@ fn test_maildir_attachment_roundtrip() {
 fn test_maildir_append_eml() {
     let dir = tmp_dir("append_eml");
 
-    let mut md = Maildir::new(&dir);
-    md.append_eml(fixture("sample.eml")).unwrap();
-    assert_eq!(md.len(), 1);
-    assert_eq!(md.messages()[0].subject(), "Sample EML");
+    let msg = MailMessage::from_eml_file(fixture("sample.eml")).unwrap();
+    assert_eq!(msg.subject(), "Sample EML");
 
-    <Maildir as MailStore>::save(&md, dir.as_path()).unwrap();
+    Maildir::append_to(dir.as_path(), &msg).unwrap();
     let loaded = Maildir::load(dir.as_path()).unwrap();
     assert_eq!(loaded.len(), 1);
 }

@@ -78,7 +78,7 @@ fn list_messages(store: &impl MailStore, verbose: bool) {
 
     for (i, msg) in all_messages.iter().enumerate() {
         // Skip tombstone messages and messages marked as deleted
-        if is_deleted(msg, &all_messages) || emx_mbox::is_tombstone(msg) {
+        if is_deleted(msg, &all_messages) || is_tombstone(msg) {
             continue;
         }
 
@@ -159,12 +159,12 @@ fn cmd_del(path: &PathBuf, indices: &[usize]) -> Result<(), Box<dyn std::error::
     // Write tombstone messages
     let mut writer = MboxWriter::open_append(path)?;
 
-    for msg in to_delete {
+    for (&idx, msg) in indices.iter().zip(to_delete.iter()) {
         let tombstone = create_tombstone(msg)?;
         writer.write_mail_message(&tombstone)?;
         println!(
             "Marked deleted: #{} (Message-ID: {})",
-            indices.iter().position(|&i| messages[i-1].message_id() == msg.message_id()).unwrap() + 1,
+            idx,
             msg.message_id().unwrap_or("N/A")
         );
     }
@@ -198,9 +198,10 @@ fn create_tombstone(original: &MailMessage) -> Result<MailMessage, Box<dyn std::
 
 /// Truncate a string to max length with ellipsis
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
+    if s.chars().count() <= max {
         s.to_string()
     } else {
-        format!("{}...", &s[..max.saturating_sub(3)])
+        let truncated: String = s.chars().take(max.saturating_sub(3)).collect();
+        format!("{}...", truncated)
     }
 }

@@ -6,6 +6,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 use std::sync::OnceLock;
+use uuid::Uuid;
 
 use crate::attachment::Attachment;
 use crate::error::MailError;
@@ -40,9 +41,31 @@ impl Clone for MailMessage {
 
 impl MailMessage {
     /// Build a `MailMessage` from raw RFC 5322 bytes.
+    /// Automatically generates a Message-ID if missing.
     pub fn from_raw(raw: Vec<u8>) -> Self {
+        let normalized = normalize_line_endings(&raw);
+
+        // Check if Message-ID exists, generate if missing
+        let has_message_id = parse_mail(&normalized)
+            .ok()
+            .and_then(|parsed| {
+                parsed
+                    .headers
+                    .iter()
+                    .find(|h| h.get_key().to_ascii_lowercase() == "message-id")
+                    .map(|_| true)
+            })
+            .unwrap_or(false);
+
+        let final_raw = if has_message_id {
+            normalized
+        } else {
+            // Insert Message-ID header
+            insert_message_id(&normalized)
+        };
+
         Self {
-            raw: normalize_line_endings(&raw),
+            raw: final_raw,
             envelope_from: None,
             headers: OnceLock::new(),
             body_cache: OnceLock::new(),
@@ -233,4 +256,38 @@ fn extract_param<'a>(header_value: &'a str, param_name: &str) -> Option<&'a str>
         }
     }
     None
+}
+
+/// Insert a Message-ID header into a raw message if missing.
+/// Returns a new Vec<u8> with the Message-ID inserted.
+/// The generated Message-ID will be persisted when the message is written.
+fn insert_message_id(raw: &[u8]) -> Vec<u8> {
+    let uuid = Uuid::new_v4();
+    let message_id = format!("<{}.emx@localhost>", uuid);
+
+    // Find the end of headers (first empty line)
+    let raw_str = String::from_utf8_lossy(raw);
+
+    // Try to find \n\n (Unix line endings) or \r\n\r\n (Windows line endings)
+    let (insert_pos, line_ending) = if let Some(pos) = raw_str.find("\n\n") {
+        (pos + 1, "\n") // Insert after first \n
+    } else if let Some(pos) = raw_str.find("\r\n\r\n") {
+        (pos + 2, "\r\n") // Insert after first \r\n
+    } else {
+        // No clear headers/body separation, append at end
+        let mut result = raw_str.to_string();
+        if !result.ends_with('\n') {
+            result.push('\n');
+        }
+        result.push_str(&format!("Message-ID: {}\n", message_id));
+        result.push('\n');
+        return result.into_bytes();
+    };
+
+    // Insert Message-ID at the found position
+    let mut result = String::new();
+    result.push_str(&raw_str[..insert_pos]);
+    result.push_str(&format!("Message-ID: {}{}", message_id, line_ending));
+    result.push_str(&raw_str[insert_pos..]);
+    result.into_bytes()
 }

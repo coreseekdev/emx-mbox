@@ -17,26 +17,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── 1. Create a Maildir with messages ───────────────────────────────
     println!("=== Creating Maildir at {} ===", dir);
-    let mut md = Maildir::new(&dir);
 
-    md.append(
-        MessageBuilder::new("alice@example.com", "[PATCH 1/2] Fix memory leak")
-            .to("linux-kernel@vger.kernel.org")
-            .body("Fix a memory leak in driver init.\n")
-            .signed_off_by("Alice <alice@example.com>")
-            .build(),
-    );
+    let msg1 = MessageBuilder::new("alice@example.com", "[PATCH 1/2] Fix memory leak")
+        .to("linux-kernel@vger.kernel.org")
+        .body("Fix a memory leak in driver init.\n")
+        .signed_off_by("Alice <alice@example.com>")
+        .build();
 
-    md.append(
-        MessageBuilder::new("alice@example.com", "[PATCH 2/2] Add error handling")
-            .to("linux-kernel@vger.kernel.org")
-            .body("Add proper error handling to probe().\n")
-            .signed_off_by("Alice <alice@example.com>")
-            .build(),
-    );
+    let msg2 = MessageBuilder::new("alice@example.com", "[PATCH 2/2] Add error handling")
+        .to("linux-kernel@vger.kernel.org")
+        .body("Add proper error handling to probe().\n")
+        .signed_off_by("Alice <alice@example.com>")
+        .build();
 
-    md.save(std::path::Path::new(&dir))?;
-    println!("Saved {} messages", md.len());
+    Maildir::append_to(std::path::Path::new(&dir), &msg1)?;
+    Maildir::append_to(std::path::Path::new(&dir), &msg2)?;
+    println!("Saved 2 messages");
 
     // ── 2. Auto-detect and open ─────────────────────────────────────────
     println!("\n=== Auto-detect format ===");
@@ -59,12 +55,10 @@ Body from mbox file.\n";
 
     let mbox = Mbox::load(mbox_data.as_bytes())?;
     let dir2 = format!("{}_converted", dir);
-    let mut md2 = Maildir::new(&dir2);
     for msg in mbox.iter() {
-        md2.append(msg.clone());
+        Maildir::append_to(std::path::Path::new(&dir2), msg)?;
     }
-    md2.save(std::path::Path::new(&dir2))?;
-    println!("Converted {} mbox messages → Maildir at {}", md2.len(), dir2);
+    println!("Converted {} mbox messages → Maildir at {}", mbox.len(), dir2);
 
     Ok(())
 }
