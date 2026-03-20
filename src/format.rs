@@ -1,17 +1,14 @@
+use std::borrow::Cow;
+
 /// Which flavour of "From " escaping to use.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MboxFormat {
     /// mboxo – only bare `From ` lines are escaped with a single `>`.
     Mboxo,
     /// mboxrd – every leading `>*From ` is escaped by prepending one more `>`.
     /// This is what b4 prefers.
+    #[default]
     Mboxrd,
-}
-
-impl Default for MboxFormat {
-    fn default() -> Self {
-        MboxFormat::Mboxrd
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -40,7 +37,7 @@ pub fn is_escaped_from(line: &[u8]) -> bool {
 /// Strip exactly one leading `>` from an mboxrd-escaped `>+From ` line.
 /// For mboxo this is a no-op (mboxo never escapes with `>`).
 #[inline]
-pub fn unescape_from_line<'a>(line: &'a [u8], format: MboxFormat) -> &'a [u8] {
+pub fn unescape_from_line(line: &[u8], format: MboxFormat) -> &[u8] {
     match format {
         MboxFormat::Mboxrd => {
             if line.starts_with(b">") {
@@ -82,9 +79,9 @@ pub fn escape_from_line(line: &[u8], format: MboxFormat) -> Option<u8> {
 }
 
 /// Normalize CRLF to LF in a byte slice.
-pub fn normalize_line_endings(data: &[u8]) -> Vec<u8> {
+pub fn normalize_line_endings(data: &[u8]) -> Cow<'_, [u8]> {
     if !data.contains(&b'\r') {
-        return data.to_vec();
+        return Cow::Borrowed(data);
     }
     let mut out = Vec::with_capacity(data.len());
     let mut i = 0;
@@ -97,7 +94,7 @@ pub fn normalize_line_endings(data: &[u8]) -> Vec<u8> {
             i += 1;
         }
     }
-    out
+    Cow::Owned(out)
 }
 
 /// Extract the bare email address from a `From:` header value.
@@ -173,9 +170,9 @@ mod tests {
 
     #[test]
     fn test_normalize_line_endings() {
-        assert_eq!(normalize_line_endings(b"a\r\nb\r\n"), b"a\nb\n");
-        assert_eq!(normalize_line_endings(b"a\nb\n"), b"a\nb\n");
-        assert_eq!(normalize_line_endings(b"no newline"), b"no newline");
+        assert_eq!(normalize_line_endings(b"a\r\nb\r\n").as_ref(), b"a\nb\n");
+        assert_eq!(normalize_line_endings(b"a\nb\n").as_ref(), b"a\nb\n");
+        assert_eq!(normalize_line_endings(b"no newline").as_ref(), b"no newline");
     }
 
     #[test]

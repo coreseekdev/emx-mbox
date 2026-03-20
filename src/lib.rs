@@ -2,6 +2,7 @@ mod attachment;
 mod builder;
 mod error;
 mod format;
+mod index;
 mod maildir;
 mod mbox;
 mod message;
@@ -9,10 +10,13 @@ mod reader;
 mod store;
 mod writer;
 
+use std::collections::HashSet;
+
 pub use attachment::Attachment;
 pub use builder::MessageBuilder;
 pub use error::MailError;
 pub use format::MboxFormat;
+pub use index::{MessageLocation, MessageMeta, MboxIndex};
 pub use maildir::Maildir;
 pub use mbox::Mbox;
 pub use message::MailMessage;
@@ -32,6 +36,12 @@ pub const TOMBSTONE_STATUS: &str = "deleted";
 /// Header referencing the original deleted message ID
 pub const X_LLM_DELETED_ID: &str = "X-LLM-Deleted-Message-ID";
 
+// Supplement support for subject override
+// Supplement is a special message appended to override another message's subject.
+
+/// Header referencing the target message ID for subject supplement
+pub const X_SUPPLEMENTS_MESSAGE_ID: &str = "Supplements-Message-ID";
+
 /// Check if a message is a tombstone (marks another message as deleted)
 pub fn is_tombstone(msg: &MailMessage) -> bool {
     msg.header(X_LLM_STATUS)
@@ -46,6 +56,17 @@ pub fn get_deleted_message_id(msg: &MailMessage) -> Option<&str> {
     } else {
         None
     }
+}
+
+/// Collect all deleted message IDs referenced by tombstone messages.
+pub fn deleted_message_ids(all_messages: &[MailMessage]) -> HashSet<&str> {
+    let mut deleted_ids = HashSet::new();
+    for msg in all_messages {
+        if let Some(deleted_id) = get_deleted_message_id(msg) {
+            deleted_ids.insert(deleted_id);
+        }
+    }
+    deleted_ids
 }
 
 /// Check if a message is marked as deleted by any tombstone

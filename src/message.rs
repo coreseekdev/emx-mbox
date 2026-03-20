@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use mailparse::parse_mail;
+use mailparse::ParsedMail;
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
@@ -11,6 +12,11 @@ use uuid::Uuid;
 use crate::attachment::Attachment;
 use crate::error::MailError;
 use crate::format::normalize_line_endings;
+
+/// Maximum allowed size of a single message body (excluding attachments).
+///
+/// Constraint: body size must be strictly less than 150 KiB.
+pub const MAX_MESSAGE_BODY_BYTES: usize = 150 * 1024;
 
 /// An owned RFC 5322 message with cached header access.
 ///
@@ -52,16 +58,16 @@ impl MailMessage {
                 parsed
                     .headers
                     .iter()
-                    .find(|h| h.get_key().to_ascii_lowercase() == "message-id")
+                    .find(|h| h.get_key().eq_ignore_ascii_case("message-id"))
                     .map(|_| true)
             })
             .unwrap_or(false);
 
         let final_raw = if has_message_id {
-            normalized
+            normalized.into_owned()
         } else {
             // Insert Message-ID header
-            insert_message_id(&normalized)
+            insert_message_id(normalized.as_ref())
         };
 
         Self {
@@ -76,6 +82,7 @@ impl MailMessage {
     pub fn from_eml_file<P: AsRef<Path>>(path: P) -> Result<Self, MailError> {
         let mut data = Vec::new();
         File::open(path)?.read_to_end(&mut data)?;
+        ensure_body_size_limit(&data)?;
         Ok(Self::from_raw(data))
     }
 
@@ -91,7 +98,7 @@ impl MailMessage {
 
     /// Replace the raw bytes and auto-invalidate the header cache.
     pub fn set_raw(&mut self, raw: Vec<u8>) {
-        self.raw = normalize_line_endings(&raw);
+        self.raw = normalize_line_endings(&raw).into_owned();
         self.headers = OnceLock::new();
         self.body_cache = OnceLock::new();
     }
@@ -161,11 +168,16 @@ impl MailMessage {
         self.header("Message-ID")
     }
 
+    /// Get the Supplements-Message-ID header if this is a supplement message.
+    pub fn supplements_message_id(&self) -> Option<&str> {
+        self.header("Supplements-Message-ID")
+    }
+
     pub fn date(&self) -> Option<DateTime<Utc>> {
         let val = self.header("Date")?;
         mailparse::dateparse(val)
             .ok()
-            .map(|ts| DateTime::from_timestamp(ts, 0).unwrap_or_else(Utc::now))
+            .and_then(|ts| DateTime::from_timestamp(ts, 0))
     }
 
     /// Return the decoded body text (first `text/plain` part).
@@ -188,14 +200,17 @@ impl MailMessage {
     /// Extract attachments from a MIME multipart message.
     /// Returns an empty Vec for plain-text messages.
     pub fn attachments(&self) -> Vec<Attachment> {
-        let parsed = match parse_mail(self.raw()) {
-            Ok(p) => p,
-            Err(_) => return Vec::new(),
-        };
+        self.attachments_result().unwrap_or_default()
+    }
 
+    /// Extract attachments from a MIME multipart message.
+    ///
+    /// Unlike `attachments()`, this returns parse/decode failures.
+    pub fn attachments_result(&self) -> Result<Vec<Attachment>, MailError> {
+        let parsed = parse_mail(self.raw())?;
         let mut result = Vec::new();
-        collect_attachments(&parsed, &mut result);
-        result
+        collect_attachments(&parsed, &mut result)?;
+        Ok(result)
     }
 }
 
@@ -206,7 +221,10 @@ impl fmt::Display for MailMessage {
 }
 
 /// Recursively walk MIME parts and collect attachment parts.
-fn collect_attachments(part: &mailparse::ParsedMail<'_>, out: &mut Vec<Attachment>) {
+fn collect_attachments(
+    part: &mailparse::ParsedMail<'_>,
+    out: &mut Vec<Attachment>,
+) -> Result<(), MailError> {
     // Check Content-Disposition for "attachment"
     let disposition = part
         .headers
@@ -216,23 +234,67 @@ fn collect_attachments(part: &mailparse::ParsedMail<'_>, out: &mut Vec<Attachmen
 
     if let Some(ref disp) = disposition {
         if disp.starts_with("attachment") {
-            let filename = extract_param(disp, "filename").unwrap_or("attachment");
+            let filename = extract_param(disp, "filename")
+                .map(|s| s.to_string())
+                .or_else(|| extract_rfc2231_param(disp, "filename"))
+                .unwrap_or_else(|| "attachment".to_string());
             let content_type = part
                 .ctype
                 .mimetype
                 .clone();
             // Get the decoded body bytes
-            if let Ok(data) = part.get_body_raw() {
-                out.push(Attachment::new(filename, content_type, data));
-                return;
-            }
+            let data = part.get_body_raw()?;
+            out.push(Attachment::new(filename, content_type, data));
+            return Ok(());
         }
     }
 
     // Recurse into sub-parts
     for sub in &part.subparts {
-        collect_attachments(sub, out);
+        collect_attachments(sub, out)?;
     }
+
+    Ok(())
+}
+
+fn is_attachment_part(part: &ParsedMail<'_>) -> bool {
+    part.headers
+        .iter()
+        .find(|h| h.get_key().eq_ignore_ascii_case("Content-Disposition"))
+        .map(|h| h.get_value())
+        .and_then(|value| {
+            value
+                .split(';')
+                .next()
+                .map(|token| token.trim().eq_ignore_ascii_case("attachment"))
+        })
+        .unwrap_or(false)
+}
+
+fn non_attachment_body_size(part: &ParsedMail<'_>) -> usize {
+    if is_attachment_part(part) {
+        return 0;
+    }
+
+    if part.subparts.is_empty() {
+        return part.get_body_raw().map(|bytes| bytes.len()).unwrap_or(0);
+    }
+
+    part.subparts.iter().map(non_attachment_body_size).sum()
+}
+
+pub(crate) fn ensure_body_size_limit(raw: &[u8]) -> Result<(), MailError> {
+    let parsed = parse_mail(raw)?;
+    let body_size = non_attachment_body_size(&parsed);
+
+    if body_size >= MAX_MESSAGE_BODY_BYTES {
+        return Err(MailError::InvalidFormat(format!(
+            "message body too large: {} bytes (limit < {} bytes)",
+            body_size, MAX_MESSAGE_BODY_BYTES
+        )));
+    }
+
+    Ok(())
 }
 
 /// Extract a named parameter from a header value like
@@ -258,36 +320,93 @@ fn extract_param<'a>(header_value: &'a str, param_name: &str) -> Option<&'a str>
     None
 }
 
+fn extract_rfc2231_param(header_value: &str, param_name: &str) -> Option<String> {
+    let target = format!("{}*", param_name);
+    for part in header_value.split(';').skip(1) {
+        let part = part.trim();
+        if let Some(rest) = part.strip_prefix(&target) {
+            let rest = rest.trim_start();
+            let val = rest.strip_prefix('=')?.trim().trim_matches('"');
+            return decode_rfc2231_value(val);
+        }
+    }
+    None
+}
+
+fn decode_rfc2231_value(value: &str) -> Option<String> {
+    if let Some(first_quote) = value.find('\'') {
+        let remaining = &value[first_quote + 1..];
+        if let Some(second_quote_rel) = remaining.find('\'') {
+            let charset = &value[..first_quote];
+            let encoded = &remaining[second_quote_rel + 1..];
+            let decoded = percent_decode(encoded)?;
+            if charset.eq_ignore_ascii_case("utf-8") {
+                return String::from_utf8(decoded).ok();
+            }
+            return Some(String::from_utf8_lossy(&decoded).into_owned());
+        }
+    }
+
+    let decoded = percent_decode(value)?;
+    Some(String::from_utf8_lossy(&decoded).into_owned())
+}
+
+fn percent_decode(input: &str) -> Option<Vec<u8>> {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            if index + 2 >= bytes.len() {
+                return None;
+            }
+            let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).ok()?;
+            let value = u8::from_str_radix(hex, 16).ok()?;
+            out.push(value);
+            index += 3;
+        } else {
+            out.push(bytes[index]);
+            index += 1;
+        }
+    }
+
+    Some(out)
+}
+
 /// Insert a Message-ID header into a raw message if missing.
 /// Returns a new Vec<u8> with the Message-ID inserted.
 /// The generated Message-ID will be persisted when the message is written.
 fn insert_message_id(raw: &[u8]) -> Vec<u8> {
     let uuid = Uuid::new_v4();
-    let message_id = format!("<{}.emx@localhost>", uuid);
+    let message_id = format!("Message-ID: <{}.emx@localhost>", uuid);
 
-    // Find the end of headers (first empty line)
-    let raw_str = String::from_utf8_lossy(raw);
+    if let Some(pos) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+        let insert_pos = pos + 2;
+        let mut result = Vec::with_capacity(raw.len() + message_id.len() + 2);
+        result.extend_from_slice(&raw[..insert_pos]);
+        result.extend_from_slice(message_id.as_bytes());
+        result.extend_from_slice(b"\r\n");
+        result.extend_from_slice(&raw[insert_pos..]);
+        return result;
+    }
 
-    // Try to find \n\n (Unix line endings) or \r\n\r\n (Windows line endings)
-    let (insert_pos, line_ending) = if let Some(pos) = raw_str.find("\n\n") {
-        (pos + 1, "\n") // Insert after first \n
-    } else if let Some(pos) = raw_str.find("\r\n\r\n") {
-        (pos + 2, "\r\n") // Insert after first \r\n
-    } else {
-        // No clear headers/body separation, append at end
-        let mut result = raw_str.to_string();
-        if !result.ends_with('\n') {
-            result.push('\n');
-        }
-        result.push_str(&format!("Message-ID: {}\n", message_id));
-        result.push('\n');
-        return result.into_bytes();
-    };
+    if let Some(pos) = raw.windows(2).position(|w| w == b"\n\n") {
+        let insert_pos = pos + 1;
+        let mut result = Vec::with_capacity(raw.len() + message_id.len() + 1);
+        result.extend_from_slice(&raw[..insert_pos]);
+        result.extend_from_slice(message_id.as_bytes());
+        result.extend_from_slice(b"\n");
+        result.extend_from_slice(&raw[insert_pos..]);
+        return result;
+    }
 
-    // Insert Message-ID at the found position
-    let mut result = String::new();
-    result.push_str(&raw_str[..insert_pos]);
-    result.push_str(&format!("Message-ID: {}{}", message_id, line_ending));
-    result.push_str(&raw_str[insert_pos..]);
-    result.into_bytes()
+    let mut result = Vec::with_capacity(raw.len() + message_id.len() + 2);
+    result.extend_from_slice(raw);
+    if !raw.ends_with(b"\n") {
+        result.push(b'\n');
+    }
+    result.extend_from_slice(message_id.as_bytes());
+    result.extend_from_slice(b"\n\n");
+    result
 }

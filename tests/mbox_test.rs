@@ -27,7 +27,7 @@ fn test_add_message_legacy() {
 fn test_append_raw() {
     let mut mbox = Mbox::new();
     let eml = b"From: test@example.com\nSubject: Raw\n\nRaw body\n";
-    mbox.append_raw(eml.to_vec());
+    mbox.append_raw(eml.to_vec()).unwrap();
 
     assert_eq!(mbox.len(), 1);
     assert_eq!(mbox.messages()[0].subject(), "Raw");
@@ -92,6 +92,58 @@ fn test_append_mail_message() {
 
     assert_eq!(mbox.len(), 1);
     assert_eq!(mbox.messages()[0].subject(), "Direct");
+}
+
+#[test]
+fn test_reject_message_body_at_limit() {
+    let body = "a".repeat(150 * 1024);
+    let eml = format!(
+        "From: test@example.com\nSubject: Too Large\n\n{}",
+        body
+    );
+    let mbox_data = format!(
+        "From test@example.com Mon Mar 16 10:00:00 2026\n{}\n",
+        eml
+    );
+
+    let err = Mbox::load(mbox_data.as_bytes()).err().unwrap();
+    assert!(
+        err.to_string().contains("message body too large"),
+        "unexpected error: {}",
+        err
+    );
+}
+
+#[test]
+fn test_allow_large_attachment_when_body_small() {
+    let boundary = "----=_boundary_test";
+    let large_attachment = "X".repeat(200 * 1024);
+    let eml = format!(
+        "From: test@example.com\n\
+Subject: Large attachment\n\
+MIME-Version: 1.0\n\
+Content-Type: multipart/mixed; boundary=\"{}\"\n\
+\n\
+--{}\n\
+Content-Type: text/plain; charset=utf-8\n\
+\n\
+ok\n\
+--{}\n\
+Content-Type: application/octet-stream; name=\"big.bin\"\n\
+Content-Disposition: attachment; filename=\"big.bin\"\n\
+\n\
+{}\n\
+--{}--\n",
+        boundary, boundary, boundary, large_attachment, boundary
+    );
+    let mbox_data = format!(
+        "From test@example.com Mon Mar 16 10:00:00 2026\n{}",
+        eml
+    );
+
+    let loaded = Mbox::load(mbox_data.as_bytes()).unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded.messages()[0].subject(), "Large attachment");
 }
 
 // -----------------------------------------------------------------------

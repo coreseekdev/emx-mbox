@@ -60,10 +60,10 @@ impl<W: Write> MboxWriter<W> {
 
         // ANSIC date: `Thu Jan  1 00:00:00 1970`
         let date_str = date.format("%a %b %e %H:%M:%S %Y").to_string();
-        write!(self.writer, "From {} {}\n", from, date_str)?;
+        writeln!(self.writer, "From {} {}", from, date_str)?;
 
         let normalized = normalize_line_endings(raw_message);
-        let msg = ensure_trailing_newline(normalized);
+        let msg = ensure_trailing_newline(normalized.into_owned());
 
         // Split on `\n`.  The final empty element after the trailing `\n`
         // is an artifact of split and should be skipped.
@@ -95,7 +95,7 @@ impl<W: Write> MboxWriter<W> {
             .map(|s| s.to_owned())
             .or_else(|| {
                 msg.header("From")
-                    .and_then(|v| extract_email_address(&v))
+                    .and_then(extract_email_address)
             })
             .unwrap_or_else(|| "mboxrd@z".into());
         self.write_message(&envelope, &date, msg.raw())

@@ -195,6 +195,7 @@ dependencies = [
  "base64",
  "chrono",
  "clap",
+ "indexmap",
  "mailparse",
  "thiserror",
  "uuid",

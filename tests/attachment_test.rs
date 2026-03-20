@@ -226,3 +226,82 @@ fn test_attachment_from_file() {
     assert_eq!(att.content_type, "image/svg+xml");
     assert!(String::from_utf8_lossy(&att.data).contains("<svg"));
 }
+
+#[test]
+fn test_attachment_from_file_in_root_ok() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures");
+    let att = Attachment::from_file_in_root(&root, "test.svg").unwrap();
+
+    assert_eq!(att.filename, "test.svg");
+    assert_eq!(att.content_type, "image/svg+xml");
+}
+
+#[test]
+fn test_attachment_from_file_in_root_rejects_traversal() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures");
+
+    let err = Attachment::from_file_in_root(&root, "..\\README.md")
+        .err()
+        .unwrap();
+    assert!(
+        err.to_string().contains("traversal"),
+        "unexpected error: {}",
+        err
+    );
+}
+
+#[test]
+fn test_attachments_result_reports_decode_error() {
+    let raw = concat!(
+        "From: sender@example.com\n",
+        "Subject: Bad base64\n",
+        "MIME-Version: 1.0\n",
+        "Content-Type: multipart/mixed; boundary=\"bad\"\n",
+        "\n",
+        "--bad\n",
+        "Content-Type: text/plain; charset=utf-8\n",
+        "\n",
+        "hello\n",
+        "--bad\n",
+        "Content-Type: application/octet-stream; name=\"x.bin\"\n",
+        "Content-Disposition: attachment; filename=\"x.bin\"\n",
+        "Content-Transfer-Encoding: base64\n",
+        "\n",
+        "***INVALID***\n",
+        "--bad--\n"
+    );
+
+    let malformed = emx_mbox::MailMessage::from_raw(raw.as_bytes().to_vec());
+    assert!(malformed.attachments().is_empty());
+    assert!(malformed.attachments_result().is_err());
+}
+
+#[test]
+fn test_attachment_filename_rfc2231_utf8() {
+    let raw = concat!(
+        "From: sender@example.com\n",
+        "Subject: RFC2231 filename\n",
+        "MIME-Version: 1.0\n",
+        "Content-Type: multipart/mixed; boundary=\"rfc2231\"\n",
+        "\n",
+        "--rfc2231\n",
+        "Content-Type: text/plain; charset=utf-8\n",
+        "\n",
+        "hello\n",
+        "--rfc2231\n",
+        "Content-Type: text/plain\n",
+        "Content-Disposition: attachment; filename*=UTF-8''%E4%B8%AD%E6%96%87.txt\n",
+        "\n",
+        "payload\n",
+        "--rfc2231--\n"
+    );
+
+    let msg = emx_mbox::MailMessage::from_raw(raw.as_bytes().to_vec());
+    let attachments = msg.attachments_result().unwrap();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(attachments[0].filename, "中文.txt");
+}

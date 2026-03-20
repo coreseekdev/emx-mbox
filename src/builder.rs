@@ -84,9 +84,8 @@ impl MessageBuilder {
         self
     }
 
-    pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.extra_headers.push((name.into(), value.into()));
-        self
+    pub fn header(self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.extra_header(name, value)
     }
 
     /// Add a trailer line (appended after the body, e.g. `Signed-off-by`).
@@ -108,6 +107,42 @@ impl MessageBuilder {
     /// Shorthand for `Acked-by` trailer.
     pub fn acked_by(self, value: impl Into<String>) -> Self {
         self.trailer("Acked-by", value)
+    }
+
+    /// Build a supplement message that overrides the subject of another message.
+    ///
+    /// # Arguments
+    ///
+    /// * `target_message_id` - The Message-ID of the message to supplement
+    /// * `subject` - The new subject to apply
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use emx_mbox::MessageBuilder;
+    /// let supplement = MessageBuilder::supplement(
+    ///     "<original@id>",
+    ///     "[补充] 原始主题"
+    /// );
+    /// ```
+    pub fn supplement(target_message_id: impl Into<String>, subject: impl Into<String>) -> Self {
+        Self {
+            from: "system@local".to_string(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            subject: subject.into(),
+            body: String::new(),
+            message_id: None,
+            in_reply_to: None,
+            references: Vec::new(),
+            date: None,
+            extra_headers: vec![(
+                "Supplements-Message-ID".to_string(),
+                target_message_id.into(),
+            )],
+            trailers: Vec::new(),
+            attachments: Vec::new(),
+        }
     }
 
     /// Attach a file by path. MIME type is guessed from the extension.

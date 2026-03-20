@@ -1,6 +1,6 @@
 //! Create a test mbox file for deletion testing
 
-use emx_mbox::{Mbox, MboxFormat, MboxWriter};
+use emx_mbox::{MboxFormat, MboxWriter};
 use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::builder::MessageBuilder;
 use crate::error::MailError;
 use crate::format::MboxFormat;
-use crate::message::MailMessage;
+use crate::message::{ensure_body_size_limit, MailMessage};
 use crate::reader::MboxReader;
 use crate::store::MailStore;
 use crate::writer::MboxWriter;
@@ -51,8 +51,10 @@ impl Mbox {
     }
 
     /// Append raw RFC 5322 bytes (e.g. from an EML file or network).
-    pub fn append_raw(&mut self, raw: Vec<u8>) {
+    pub fn append_raw(&mut self, raw: Vec<u8>) -> Result<(), MailError> {
+        ensure_body_size_limit(&raw)?;
         self.messages.push(MailMessage::from_raw(raw));
+        Ok(())
     }
 
     /// Append from an EML file on disk.
@@ -123,8 +125,10 @@ impl MailStore for Mbox {
         let Ok(mut f) = File::open(path) else {
             return false;
         };
+        // Use `read` instead of `read_exact` to avoid blocking on small files
         let mut buf = [0u8; 5];
-        f.read_exact(&mut buf).is_ok() && buf == *b"From "
+        let n = f.read(&mut buf).unwrap_or(0);
+        n == 5 && buf == *b"From "
     }
 }
 

@@ -190,7 +190,7 @@ fn test_mail_store_trait_polymorphism() {
         store.len()
     }
 
-    fn first_subject<'a>(store: &'a dyn MailStore) -> &'a str {
+    fn first_subject(store: &dyn MailStore) -> &str {
         store.messages().first().map(|m| m.subject()).unwrap_or("")
     }
 

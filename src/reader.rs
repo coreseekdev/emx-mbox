@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::error::MailError;
 use crate::format::{is_from_line, normalize_line_endings, unescape_from_line, MboxFormat};
-use crate::message::MailMessage;
+use crate::message::{ensure_body_size_limit, MailMessage};
 
 /// Raw result from `next_raw` — envelope info plus message bytes.
 pub struct RawMessage {
@@ -108,7 +108,7 @@ impl<R: Read> MboxReader<R> {
                 if let Some(blank) = prev_blank.take() {
                     message.extend_from_slice(&blank);
                 }
-                prev_blank = Some(normalize_line_endings(raw_bytes));
+                prev_blank = Some(normalize_line_endings(raw_bytes).into_owned());
                 continue;
             }
 
@@ -143,6 +143,7 @@ impl<R: Read> MboxReader<R> {
     pub fn next_message(&mut self) -> Result<Option<MailMessage>, MailError> {
         match self.next_raw()? {
             Some(raw_msg) => {
+                ensure_body_size_limit(&raw_msg.data)?;
                 let mut msg = MailMessage::from_raw(raw_msg.data);
                 msg.set_envelope_from(parse_envelope_from(&raw_msg.envelope));
                 Ok(Some(msg))

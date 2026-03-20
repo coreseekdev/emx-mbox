@@ -1,6 +1,6 @@
 //! Test Message-ID generation for messages without Message-ID header
 
-use emx_mbox::{MailMessage, MessageBuilder, Mbox, MboxWriter};
+use emx_mbox::{MailMessage, MessageBuilder};
 
 fn main() {
     println!("=== Testing Message-ID generation ===\n");

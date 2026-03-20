@@ -6,12 +6,8 @@
 //!   del <path> <n>...     Mark messages for deletion (tombstone)
 
 use clap::{Parser, Subcommand};
-use emx_mbox::{is_deleted, is_tombstone, MailStore, Maildir, Mbox, MboxWriter, MailMessage, MessageBuilder};
+use emx_mbox::{deleted_message_ids, is_tombstone, MailStore, Maildir, Mbox, MboxWriter, MailMessage, MessageBuilder, TOMBSTONE_STATUS, X_LLM_STATUS};
 use std::path::PathBuf;
-
-/// Tombstone header for marking deleted messages
-const X_LLM_STATUS: &str = "X-LLM-Status";
-const TOMBSTONE_STATUS: &str = "deleted";
 
 #[derive(Parser)]
 #[command(name = "emx-mbox", about = "Append-only mbox/maildir management tool")]
@@ -75,10 +71,16 @@ fn cmd_list(path: &PathBuf, verbose: bool) -> Result<(), Box<dyn std::error::Err
 /// List messages with index (excludes deleted messages and tombstones)
 fn list_messages(store: &impl MailStore, verbose: bool) {
     let all_messages: Vec<_> = store.messages().to_vec();
+    let deleted_ids = deleted_message_ids(&all_messages);
 
     for (i, msg) in all_messages.iter().enumerate() {
         // Skip tombstone messages and messages marked as deleted
-        if is_deleted(msg, &all_messages) || is_tombstone(msg) {
+        if is_tombstone(msg)
+            || msg
+                .message_id()
+                .map(|id| deleted_ids.contains(id))
+                .unwrap_or(false)
+        {
             continue;
         }
 
@@ -198,10 +200,19 @@ fn create_tombstone(original: &MailMessage) -> Result<MailMessage, Box<dyn std::
 
 /// Truncate a string to max length with ellipsis
 fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let truncated: String = s.chars().take(max.saturating_sub(3)).collect();
-        format!("{}...", truncated)
+    let prefix: String = s.chars().take(max).collect();
+    if prefix.chars().count() < max {
+        return prefix;
     }
+
+    if s.chars().nth(max).is_none() {
+        return prefix;
+    }
+
+    if max <= 3 {
+        return prefix;
+    }
+
+    let truncated: String = prefix.chars().take(max - 3).collect();
+    format!("{}...", truncated)
 }

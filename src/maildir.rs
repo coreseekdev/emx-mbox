@@ -1,9 +1,12 @@
-use std::fs;
+use std::fs::{self, File};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::error::MailError;
-use crate::message::MailMessage;
+use crate::message::{ensure_body_size_limit, MailMessage};
 use crate::store::MailStore;
+
+const MAX_FILENAME_COLLISIONS: u32 = 10_000;
 
 /// Maildir storage backend (new / cur / tmp).
 ///
@@ -56,34 +59,70 @@ impl Maildir {
     /// Write a single message atomically: tmp → new.
     /// If the target filename already exists in `new/`, a suffix is appended
     /// to avoid silently overwriting data.
+    ///
+    /// Uses atomic file creation (`File::create_new`) to avoid TOCTOU race conditions.
     fn write_message_atomic(root: &Path, msg: &MailMessage, index: usize) -> Result<(), MailError> {
         let base_name = Self::message_filename(msg, index);
-        let new_path = root.join("new").join(&base_name);
-        let (final_new, final_name) = if !new_path.exists() {
-            (new_path, base_name)
-        } else {
-            // Append _1, _2, … to deduplicate
-            let stem = base_name.trim_end_matches(".eml");
-            let mut found = None;
-            for i in 1u32..10000 {
-                let alt = format!("{}_{}.eml", stem, i);
-                let alt_path = root.join("new").join(&alt);
-                if !alt_path.exists() {
-                    found = Some((alt_path, alt));
+        let tmp_dir = root.join("tmp");
+        let new_dir = root.join("new");
+
+        // Try base name first, then _1, _2, ... for deduplication
+        let stem = base_name.trim_end_matches(".eml");
+        let mut tmp_path = None;
+        let mut final_name = None;
+
+        for i in 0u32..MAX_FILENAME_COLLISIONS {
+            let name = if i == 0 {
+                base_name.clone()
+            } else {
+                format!("{}_{}.eml", stem, i)
+            };
+
+            // Use atomic file creation to avoid TOCTOU race
+            let candidate_tmp = tmp_dir.join(&name);
+            match File::create_new(&candidate_tmp) {
+                Ok(mut file) => {
+                    // Successfully created tmp file, write content
+                    file.write_all(msg.raw())?;
+                    file.flush()?;
+                    tmp_path = Some(candidate_tmp);
+                    final_name = Some(name);
                     break;
                 }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // File exists, try next suffix
+                    continue;
+                }
+                Err(e) => {
+                    // Other error, propagate
+                    return Err(MailError::Io(e));
+                }
             }
-            found.ok_or_else(|| MailError::InvalidFormat("too many filename collisions".into()))?
+        }
+
+        let (tmp_path, final_name) = match (tmp_path, final_name) {
+            (Some(t), Some(n)) => (t, n),
+            _ => {
+                return Err(MailError::InvalidFormat(
+                    format!(
+                        "too many filename collisions (tried {} variants)",
+                        MAX_FILENAME_COLLISIONS
+                    ),
+                ))
+            }
         };
-        let tmp_path = root.join("tmp").join(&final_name);
-        fs::write(&tmp_path, msg.raw())?;
+
+        // Atomic rename from tmp to new
+        let final_new = new_dir.join(&final_name);
         fs::rename(&tmp_path, &final_new)?;
         Ok(())
     }
 
     /// Append raw RFC 5322 bytes.
-    pub fn append_raw(&mut self, raw: Vec<u8>) {
+    pub fn append_raw(&mut self, raw: Vec<u8>) -> Result<(), MailError> {
+        ensure_body_size_limit(&raw)?;
         self.messages.push(MailMessage::from_raw(raw));
+        Ok(())
     }
 
     /// Append from an EML file on disk.
