@@ -26,6 +26,7 @@ Applied code fixes in this round:
 - ✅ Replaced maildir filename-collision magic number with named constant
 - ✅ Optimized CLI `truncate` helper to avoid full-string pre-count scan
 - ✅ Added RFC 2231 `filename*=` decoding for attachment filenames (UTF-8 percent-encoded)
+- ✅ **MailStore API Refactoring**: Separated factory methods (`load`, `detect`, `append_to`) from instance methods by splitting into `MailStoreFactory` trait (concrete type only) and object-safe `MailStore` trait (polymorphic interface)
 
 Verification:
 

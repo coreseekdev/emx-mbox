@@ -6,7 +6,7 @@
 //!   del <path> <n>...     Mark messages for deletion (tombstone)
 
 use clap::{Parser, Subcommand};
-use emx_mbox::{deleted_message_ids, is_tombstone, MailStore, Maildir, Mbox, MboxWriter, MailMessage, MessageBuilder, TOMBSTONE_STATUS, X_LLM_STATUS};
+use emx_mbox::{deleted_message_ids, is_tombstone, MailStore, MailStoreFactory, Maildir, Mbox, MboxWriter, MailMessage, MessageBuilder, TOMBSTONE_STATUS, X_LLM_STATUS, open};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -54,22 +54,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Detect storage format and list messages
-fn cmd_list(path: &PathBuf, verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
-    if Maildir::is_maildir(path) {
-        let maildir = Maildir::load(path)?;
-        list_messages(&maildir, verbose);
-    } else if path.is_file() || !path.exists() {
-        let mbox = Mbox::load_file(path)?;
-        list_messages(&mbox, verbose);
-    } else {
-        eprintln!("Error: {} is not a valid mbox file or maildir", path.display());
-        std::process::exit(1);
-    }
+fn cmd_list(path: &std::path::Path, verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let store = open(path)?;
+    list_messages(&*store, verbose);
     Ok(())
 }
 
 /// List messages with index (excludes deleted messages and tombstones)
-fn list_messages(store: &impl MailStore, verbose: bool) {
+fn list_messages(store: &dyn MailStore, verbose: bool) {
     let all_messages: Vec<_> = store.messages().to_vec();
     let deleted_ids = deleted_message_ids(&all_messages);
 
@@ -105,7 +97,7 @@ fn list_messages(store: &impl MailStore, verbose: bool) {
 }
 
 /// Append EML files to mbox or maildir
-fn cmd_add(path: &PathBuf, eml_files: &[PathBuf]) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_add(path: &std::path::Path, eml_files: &[PathBuf]) -> Result<(), Box<dyn std::error::Error>> {
     if eml_files.is_empty() {
         eprintln!("Error: no EML files specified");
         std::process::exit(1);
@@ -116,14 +108,14 @@ fn cmd_add(path: &PathBuf, eml_files: &[PathBuf]) -> Result<(), Box<dyn std::err
         // For maildir, append each message individually
         for eml in eml_files {
             let msg = MailMessage::from_eml_file(eml)?;
-            Maildir::append_to(path, &msg)?;
+            <Maildir as MailStoreFactory>::append_to(path, &msg)?;
             println!("Added: {}", eml.display());
         }
     } else {
         // Append to mbox file
         for eml in eml_files {
             let msg = MailMessage::from_eml_file(eml)?;
-            Mbox::append_to_file(path, &msg)?;
+            <Mbox as MailStoreFactory>::append_to(path, &msg)?;
             println!("Added: {}", eml.display());
         }
     }

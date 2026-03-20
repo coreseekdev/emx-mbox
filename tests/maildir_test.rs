@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use emx_mbox::{Maildir, MailMessage, MailStore, Mbox, MessageBuilder, MboxWriter};
+use emx_mbox::{Maildir, MailMessage, MailStore, MailStoreFactory, Mbox, MessageBuilder, MboxWriter};
 
 fn tmp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join("emx_mbox_test").join(name);
@@ -89,7 +89,7 @@ fn test_maildir_detect() {
     fs::create_dir_all(dir.join("cur")).unwrap();
     fs::create_dir_all(dir.join("tmp")).unwrap();
     assert!(Maildir::is_maildir(&dir));
-    assert!(<Maildir as MailStore>::detect(dir.as_path()));
+    assert!(<Maildir as MailStoreFactory>::detect(dir.as_path()));
 }
 
 #[test]
@@ -205,8 +205,8 @@ fn test_mail_store_trait_polymorphism() {
         .build();
     Maildir::append_to(dir.as_path(), &msg).unwrap();
     let md_loaded = Maildir::load(dir.as_path()).unwrap();
-    assert_eq!(count_messages(&md_loaded), 1);
-    assert_eq!(first_subject(&md_loaded), "Trait test");
+    assert_eq!(count_messages(&*md_loaded), 1);
+    assert_eq!(first_subject(&*md_loaded), "Trait test");
 }
 
 // -----------------------------------------------------------------------

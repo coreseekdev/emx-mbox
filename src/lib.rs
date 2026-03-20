@@ -21,7 +21,7 @@ pub use maildir::Maildir;
 pub use mbox::Mbox;
 pub use message::MailMessage;
 pub use reader::MboxReader;
-pub use store::{open, MailStore};
+pub use store::{open, MailStore, MailStoreFactory};
 pub use writer::MboxWriter;
 
 // Tombstone support for mark-deletion

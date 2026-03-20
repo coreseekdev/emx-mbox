@@ -6,7 +6,7 @@
 //! Usage:
 //!   cargo run --example maildir_ops -- /tmp/test.maildir
 
-use emx_mbox::{MailStore, Maildir, Mbox, MessageBuilder};
+use emx_mbox::{MailStore, MailStoreFactory, Maildir, Mbox, MessageBuilder};
 use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

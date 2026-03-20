@@ -7,7 +7,7 @@ use crate::error::MailError;
 use crate::format::MboxFormat;
 use crate::message::{ensure_body_size_limit, MailMessage};
 use crate::reader::MboxReader;
-use crate::store::MailStore;
+use crate::store::{MailStore, MailStoreFactory};
 use crate::writer::MboxWriter;
 
 /// In-memory collection of messages with load / append operations.
@@ -94,23 +94,10 @@ impl Default for Mbox {
     }
 }
 
-impl MailStore for Mbox {
-    fn load(path: &Path) -> Result<Self, MailError> {
-        Self::load_file(path)
-    }
-
-    #[inline]
-    fn len(&self) -> usize {
-        self.messages.len()
-    }
-
-    #[inline]
-    fn messages(&self) -> &[MailMessage] {
-        &self.messages
-    }
-
-    fn append(&mut self, msg: MailMessage) {
-        self.messages.push(msg);
+impl MailStoreFactory for Mbox {
+    fn load(path: &Path) -> Result<Box<dyn MailStore>, MailError> {
+        let mbox = Self::load_file(path)?;
+        Ok(Box::new(mbox))
     }
 
     fn append_to(path: &Path, msg: &MailMessage) -> Result<(), MailError> {
@@ -129,6 +116,22 @@ impl MailStore for Mbox {
         let mut buf = [0u8; 5];
         let n = f.read(&mut buf).unwrap_or(0);
         n == 5 && buf == *b"From "
+    }
+}
+
+impl MailStore for Mbox {
+    #[inline]
+    fn len(&self) -> usize {
+        self.messages.len()
+    }
+
+    #[inline]
+    fn messages(&self) -> &[MailMessage] {
+        &self.messages
+    }
+
+    fn append(&mut self, msg: MailMessage) {
+        self.messages.push(msg);
     }
 }
 

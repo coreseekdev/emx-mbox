@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::MailError;
 use crate::message::{ensure_body_size_limit, MailMessage};
-use crate::store::MailStore;
+use crate::store::{MailStore, MailStoreFactory};
 
 const MAX_FILENAME_COLLISIONS: u32 = 10_000;
 
@@ -132,8 +132,8 @@ impl Maildir {
     }
 }
 
-impl MailStore for Maildir {
-    fn load(path: &Path) -> Result<Self, MailError> {
+impl MailStoreFactory for Maildir {
+    fn load(path: &Path) -> Result<Box<dyn MailStore>, MailError> {
         let root = path.to_path_buf();
         if !Self::is_maildir(&root) {
             return Err(MailError::InvalidFormat(
@@ -159,21 +159,7 @@ impl MailStore for Maildir {
             }
         }
 
-        Ok(Self { root, messages })
-    }
-
-    #[inline]
-    fn len(&self) -> usize {
-        self.messages.len()
-    }
-
-    #[inline]
-    fn messages(&self) -> &[MailMessage] {
-        &self.messages
-    }
-
-    fn append(&mut self, msg: MailMessage) {
-        self.messages.push(msg);
+        Ok(Box::new(Self { root, messages }))
     }
 
     fn append_to(path: &Path, msg: &MailMessage) -> Result<(), MailError> {
@@ -191,6 +177,22 @@ impl MailStore for Maildir {
 
     fn detect(path: &Path) -> bool {
         Self::is_maildir(path)
+    }
+}
+
+impl MailStore for Maildir {
+    #[inline]
+    fn len(&self) -> usize {
+        self.messages.len()
+    }
+
+    #[inline]
+    fn messages(&self) -> &[MailMessage] {
+        &self.messages
+    }
+
+    fn append(&mut self, msg: MailMessage) {
+        self.messages.push(msg);
     }
 }
 

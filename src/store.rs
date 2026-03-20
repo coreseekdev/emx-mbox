@@ -3,16 +3,27 @@ use std::path::Path;
 use crate::error::MailError;
 use crate::message::MailMessage;
 
-/// Unified interface for mail storage backends (mbox, maildir, …).
+/// Factory trait for loading, detecting, and appending to mail stores.
 ///
-/// Every backend can load, save, append, and count messages.
-/// Implementations are free to keep messages in memory or stream from disk.
-pub trait MailStore {
-    /// Load all messages from `path`.
-    fn load(path: &Path) -> Result<Self, MailError>
-    where
-        Self: Sized;
+/// Implemented by concrete types (Mbox, Maildir).
+/// These methods cannot be part of the object-safe `MailStore` trait
+/// because they require `Self: Sized`.
+pub trait MailStoreFactory: Sized {
+    /// Load all messages from `path` and return a boxed instance for polymorphic use.
+    fn load(path: &Path) -> Result<Box<dyn MailStore>, MailError>;
 
+    /// Append a single message to an existing store on disk.
+    fn append_to(path: &Path, msg: &MailMessage) -> Result<(), MailError>;
+
+    /// Detect whether `path` looks like this storage format.
+    fn detect(path: &Path) -> bool;
+}
+
+/// Object-safe interface for interacting with loaded mail stores.
+///
+/// Instance methods only; can be used as `&dyn MailStore`, `Box<dyn MailStore>`, etc.
+/// Factory operations (load, detect, append_to) are on the `MailStoreFactory` trait.
+pub trait MailStore {
     /// Number of messages currently held.
     fn len(&self) -> usize;
 
@@ -31,16 +42,6 @@ pub trait MailStore {
 
     /// Append a pre-built message.
     fn append(&mut self, msg: MailMessage);
-
-    /// Append a single message to an existing store on disk.
-    fn append_to(path: &Path, msg: &MailMessage) -> Result<(), MailError>
-    where
-        Self: Sized;
-
-    /// Detect whether `path` looks like this storage format.
-    fn detect(path: &Path) -> bool
-    where
-        Self: Sized;
 }
 
 /// Auto-detect the storage format at `path` and load it.
@@ -52,9 +53,9 @@ pub fn open(path: &Path) -> Result<Box<dyn MailStore>, MailError> {
     use crate::mbox::Mbox;
 
     if Maildir::detect(path) {
-        Ok(Box::new(Maildir::load(path)?))
+        <Maildir as MailStoreFactory>::load(path)
     } else if Mbox::detect(path) {
-        Ok(Box::new(Mbox::load_file(path)?))
+        <Mbox as MailStoreFactory>::load(path)
     } else {
         Err(MailError::InvalidFormat(
             "unrecognized mail store format".into(),
